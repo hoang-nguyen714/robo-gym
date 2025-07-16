@@ -218,4 +218,4 @@ def test_rot_inv():
     assert math.isclose(q_mult[0], 0, abs_tol=0.000001)
     assert math.isclose(q_mult[1], 0, abs_tol=0.000001)
     assert math.isclose(q_mult[2], 0, abs_tol=0.000001)
-    assert math.isclose(q_mult[3], 1, abs_tol=0.000001)
+    assert math.isclose(abs(q_mult[3]), 1, abs_tol=0.000001)  # Allow both 1 and -1

@@ -376,7 +376,8 @@ class EndEffectorPositioningUR(URBaseEnv):
 
         action = action.astype(np.float32)
 
-        state, reward, done, truncated, info = super().step(action)
+        state, reward, terminated, truncated, info = super().step(action)
+        done = terminated or truncated
         self.previous_action = self.add_fixed_joints(action)
 
         if done:
@@ -398,7 +399,7 @@ class EndEffectorPositioningUR(URBaseEnv):
                 joint_positions = np.array(joint_positions)
                 self.last_position = joint_positions
 
-        return state, reward, done, truncated, info
+        return state, reward, terminated, truncated, info
 
     def reward(self, rs_state, action) -> Tuple[float, bool, dict]:
         reward = 0

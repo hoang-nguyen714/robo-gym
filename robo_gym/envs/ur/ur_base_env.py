@@ -265,8 +265,12 @@ class URBaseEnv(gym.Env):
         reward, done, info = self.reward(rs_state=rs_state, action=action)
         if self.rs_state_to_info:
             info["rs_state"] = self.rs_state
+        
+        # In new Gymnasium API, separate terminated vs truncated
+        terminated = done and info.get("final_status") != "max_steps_exceeded"
+        truncated = done and info.get("final_status") == "max_steps_exceeded"
 
-        return state, reward, done, False, info
+        return state, reward, terminated, truncated, info
 
     def get_rs_state(self):
         return self.rs_state

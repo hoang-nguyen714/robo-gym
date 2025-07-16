@@ -151,7 +151,8 @@ class AvoidanceRaad2022UR(URBaseAvoidanceEnv):
 
         self.elapsed_steps_in_current_state += 1
 
-        state, reward, done, truncated, info = super().step(action)
+        state, reward, terminated, truncated, info = super().step(action)
+        done = terminated or truncated
 
         # Check if waypoint was reached
         joint_positions = []
@@ -181,7 +182,7 @@ class AvoidanceRaad2022UR(URBaseAvoidanceEnv):
 
         self.prev_action = self.add_fixed_joints(action)
 
-        return state, reward, done, truncated, info
+        return state, reward, terminated, truncated, info
 
     def reward(self, rs_state, action) -> Tuple[float, bool, dict]:
         env_state = self._robot_server_state_to_env_state(rs_state)

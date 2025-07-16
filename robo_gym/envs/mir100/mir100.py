@@ -167,8 +167,12 @@ class Mir100Env(gym.Env):
 
         # Assign reward
         reward, done, info = self._reward(rs_state=rs_state, action=action)
+        
+        # In new Gymnasium API, separate terminated vs truncated
+        terminated = done and info.get("final_status") != "max_steps_exceeded"
+        truncated = done and info.get("final_status") == "max_steps_exceeded"
 
-        return self.state, reward, done, False, info
+        return self.state, reward, terminated, truncated, info
 
     def render(self):
         pass

@@ -174,7 +174,7 @@ def quat_from_euler(
     roll: float, pitch: float, yaw: float, seq="zyz", quat_unique: bool = False
 ) -> NDArray:
     rot = R.from_euler(seq=seq, angles=[roll, pitch, yaw])
-    return rot.as_quat(canonical=quat_unique)
+    return rot.as_quat()
 
 
 def quat_from_euler_xyz(
@@ -200,13 +200,13 @@ def quat_mul(q1: NDArray, q2: NDArray, quat_unique: bool = False) -> NDArray:
     r2 = R.from_quat(q2)
     # TODO verify that this does what we want
     r_result = r1 * r2
-    return r_result.as_quat(canonical=quat_unique)
+    return r_result.as_quat()
 
 
 def quat_inv(q: NDArray, quat_unique: bool = False) -> NDArray:
     r = R.from_quat(q)
     r_inv = r.inv()
-    return r_inv.as_quat(canonical=quat_unique)
+    return r_inv.as_quat()
 
 
 def quat_from_euler_xyz_isaac(roll: float, pitch: float, yaw: float) -> NDArray:

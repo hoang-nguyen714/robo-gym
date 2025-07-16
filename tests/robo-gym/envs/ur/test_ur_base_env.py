@@ -25,19 +25,24 @@ def env(request):
     )
     env.request_param = request.param
     yield env
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
 
 
 @pytest.mark.commit
 def test_initialization(env):
-    assert env.ur.model_key == env.request_param
+    assert env.unwrapped.ur.model_key == env.request_param
     env.reset()
     done = False
     env.step([0, 0, 0, 0, 0])
     for _ in range(10):
         if not done:
             action = env.action_space.sample()
-            observation, _, done, _, _ = env.step(action)
+            observation, _, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
 
     assert env.observation_space.contains(observation)
 
@@ -55,10 +60,11 @@ def test_self_collision(env):
         "ur16e": [0.0, -1.15, 2.9, -0.19, 0.42],
     }
     env.reset()
-    action = env.ur.normalize_joint_values(collision_joint_config[env.ur.model_key])
+    action = env.unwrapped.ur.normalize_joint_values(collision_joint_config[env.unwrapped.ur.model_key])
     done = False
     while not done:
-        _, _, done, _, info = env.step(action)
+        _, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "collision"
 
 
@@ -75,10 +81,11 @@ def test_collision_with_ground(env):
         "ur16e": [0.0, -0.15, 1.32, 0.0, 1.63],
     }
     env.reset()
-    action = env.ur.normalize_joint_values(collision_joint_config[env.ur.model_key])
+    action = env.unwrapped.ur.normalize_joint_values(collision_joint_config[env.unwrapped.ur.model_key])
     done = False
     while not done:
-        _, _, done, _, info = env.step(action)
+        _, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "collision"
 
 
@@ -86,9 +93,9 @@ def test_collision_with_ground(env):
 def test_reset_joint_positions(env):
     joint_positions = [0.2, -2.5, 1.1, -2.0, -1.2, 1.2]
 
-    state = env.reset(options={"joint_positions": joint_positions})
+    state, _ = env.reset(options={"joint_positions": joint_positions})
     assert np.isclose(
-        env.ur.normalize_joint_values(joint_positions), state[0:6], atol=0.1
+        env.unwrapped.ur.normalize_joint_values(joint_positions), state[0:6], atol=0.1
     ).all()
 
 
@@ -193,7 +200,7 @@ def test_fixed_joints(
         fix_wrist_3=fix_wrist_3,
         ur_model=ur_model,
     )
-    state = env.reset()
+    state, _ = env.reset()
     initial_joint_positions = state[0:6]
     # Take 20 actions
     action = env.action_space.sample()
@@ -226,4 +233,8 @@ def test_fixed_joints(
             initial_joint_positions[5], joint_positions[5], abs_tol=0.05
         )
 
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()

@@ -17,9 +17,9 @@ class EndEffectorPositioningURTrainingCurriculum(gym.Wrapper):
 
     def reset(self, **kwargs):
         if self.episode_counter % 5 == 0:
-            state = self.env.reset(randomize_start=True)
+            state, info = self.env.reset(options={"randomize_start": True})
         else:
-            state = self.env.reset(continue_on_success=True)
+            state, info = self.env.reset(options={"continue_on_success": True})
 
         self.reward_composition = { 'goal_reached_weight': 0,
                                     'collision_weight': 0,
@@ -28,14 +28,18 @@ class EndEffectorPositioningURTrainingCurriculum(gym.Wrapper):
                                     'action_magnitude_weight': 0,
                                     'velocity_magnitude_weight': 0}
 
-        return state
+        return state, info
 
     def step(self, action):
         self.previous_action = self.env.previous_action
-        next_state, _, _, _ = self.env.step(action)
+        next_state, _, _, _, _ = self.env.step(action)
 
         action = self.env.add_fixed_joints(action)
         reward, done, info = self.reward(rs_state=self.env.rs_state, action=action)
+
+        # In new Gymnasium API, separate terminated vs truncated
+        terminated = done and info.get("final_status") != "max_steps_exceeded"
+        truncated = done and info.get("final_status") == "max_steps_exceeded"
 
         if done:
             self.episode_counter += 1
@@ -44,7 +48,7 @@ class EndEffectorPositioningURTrainingCurriculum(gym.Wrapper):
             print(f'Episode counter: {self.episode_counter}   Current level: {self.get_level()}')
             print(self.reward_composition)
 
-        return next_state, reward, done, info
+        return next_state, reward, terminated, truncated, info
 
     def get_level(self):
         level_thresholds = [75, 250, 500, 1000, 1500, 2500]
@@ -177,3 +181,23 @@ class EndEffectorPositioningURTrainingCurriculum(gym.Wrapper):
             info['target_coord'] = target_coord
         
         return reward, done, info
+
+    @property
+    def elapsed_steps(self):
+        """Get elapsed steps from the underlying environment."""
+        return getattr(self.env, 'elapsed_steps', 0)
+    
+    @property 
+    def max_episode_steps(self):
+        """Get max episode steps from the underlying environment."""
+        return getattr(self.env, 'max_episode_steps', 500)
+
+    def kill_sim(self):
+        """Kill simulation by delegating to the underlying environment."""
+        if hasattr(self.env, 'kill_sim'):
+            return self.env.kill_sim()
+        elif hasattr(self.env, 'unwrapped') and hasattr(self.env.unwrapped, 'kill_sim'):
+            return self.env.unwrapped.kill_sim()
+        else:
+            # If no kill_sim method is available, do nothing
+            pass

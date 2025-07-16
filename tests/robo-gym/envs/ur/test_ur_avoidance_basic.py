@@ -23,19 +23,24 @@ def env(request):
     env = gym.make("BasicAvoidanceURSim-v0", ip=ip, ur_model=request.param)
     env.request_param = request.param
     yield env
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
 
 
 @pytest.mark.commit
 def test_initialization(env):
-    assert env.ur.model_key == env.request_param
+    assert env.unwrapped.ur.model_key == env.request_param
     env.reset()
     done = False
     env.step([0, 0, 0, 0, 0])
     for _ in range(10):
         if not done:
             action = env.action_space.sample()
-            observation, _, done, _, _ = env.step(action)
+            observation, _, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
 
     assert env.observation_space.contains(observation)
 
@@ -54,14 +59,15 @@ def test_object_collision(env):
 
     env.reset(
         options={
-            "desired_joint_positions": params[env.ur.model_key]["joint_positions"],
-            "fixed_object_position": params[env.ur.model_key]["object_coords"],
+            "desired_joint_positions": params[env.unwrapped.ur.model_key]["joint_positions"],
+            "fixed_object_position": params[env.unwrapped.ur.model_key]["object_coords"],
         }
     )
     done = False
     i = 0
-    while (not done) or i <= params[env.ur.model_key]["n_steps"]:
-        _, _, done, _, info = env.step(params[env.ur.model_key]["action"])
+    while (not done) or i <= params[env.unwrapped.ur.model_key]["n_steps"]:
+        _, _, terminated, truncated, info = env.step(params[env.unwrapped.ur.model_key]["action"])
+        done = terminated or truncated
         i += 1
     assert info["final_status"] == "collision"
 
@@ -70,9 +76,9 @@ def test_object_collision(env):
 def test_reset_joint_positions(env):
     joint_positions = [0.5, -2.7, 1.3, -1.7, -1.9, 1.6]
 
-    state = env.reset(options={"joint_positions": joint_positions})
+    state, _ = env.reset(options={"joint_positions": joint_positions})
     assert np.isclose(
-        env.ur.normalize_joint_values(joint_positions), state[3:9], atol=0.1
+        env.unwrapped.ur.normalize_joint_values(joint_positions), state[3:9], atol=0.1
     ).all()
 
 
@@ -120,19 +126,19 @@ def test_object_coordinates(env):
         },
     }
 
-    state = env.reset(
+    state, _ = env.reset(
         options={
-            "joint_positions": params[env.ur.model_key]["joint_positions"],
-            "fixed_object_position": params[env.ur.model_key]["object_coords"],
+            "joint_positions": params[env.unwrapped.ur.model_key]["joint_positions"],
+            "fixed_object_position": params[env.unwrapped.ur.model_key]["object_coords"],
         }
     )
     assert np.isclose(
-        [params[env.ur.model_key]["polar_coords"]["r"]], state[0], atol=0.05
+        [params[env.unwrapped.ur.model_key]["polar_coords"]["r"]], state[0], atol=0.05
     ).all()
     assert np.isclose(
         [
-            params[env.ur.model_key]["polar_coords"]["theta"],
-            params[env.ur.model_key]["polar_coords"]["phi"],
+            params[env.unwrapped.ur.model_key]["polar_coords"]["theta"],
+            params[env.unwrapped.ur.model_key]["polar_coords"]["phi"],
         ],
         state[1:3],
         atol=0.2,
@@ -240,7 +246,7 @@ def test_fixed_joints(
         fix_wrist_3=fix_wrist_3,
         ur_model=ur_model,
     )
-    state = env.reset()
+    state, _ = env.reset()
     initial_joint_positions = state[3:9]
     # Take 20 actions
     action = env.action_space.sample()
@@ -273,4 +279,8 @@ def test_fixed_joints(
             initial_joint_positions[5], joint_positions[5], abs_tol=0.05
         )
 
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()

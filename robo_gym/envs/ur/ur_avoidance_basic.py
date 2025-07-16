@@ -182,11 +182,12 @@ class BasicAvoidanceUR(URBaseAvoidanceEnv):
 
         action = action.astype(np.float32)
 
-        state, reward, done, truncated, info = super().step(action)
+        state, reward, terminated, truncated, info = super().step(action)
+        done = terminated or truncated
 
         self.prev_action = self.add_fixed_joints(action)
 
-        return state, reward, done, truncated, info
+        return state, reward, terminated, truncated, info
 
 
 class BasicAvoidanceURSim(BasicAvoidanceUR, Simulation):

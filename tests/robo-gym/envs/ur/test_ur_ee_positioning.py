@@ -23,19 +23,24 @@ def env(request):
     env = gym.make("EndEffectorPositioningURSim-v0", ip=ip, ur_model=request.param)
     env.request_param = request.param
     yield env
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
 
 
 @pytest.mark.commit
 def test_initialization(env):
-    assert env.ur.model_key == env.request_param
+    assert env.unwrapped.ur.model_key == env.request_param
     env.reset()
     done = False
     env.step([0, 0, 0, 0, 0])
     for _ in range(10):
         if not done:
             action = env.action_space.sample()
-            observation, _, done, _, _ = env.step(action)
+            observation, _, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
 
     assert env.observation_space.contains(observation)
 
@@ -53,10 +58,11 @@ def test_self_collision(env):
         "ur16e": [0.0, -1.15, 2.9, -0.19, 0.42],
     }
     env.reset()
-    action = env.ur.normalize_joint_values(collision_joint_config[env.ur.model_key])
+    action = env.unwrapped.ur.normalize_joint_values(collision_joint_config[env.unwrapped.ur.model_key])
     done = False
     while not done:
-        _, _, done, _, info = env.step(action)
+        _, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "collision"
 
 
@@ -73,10 +79,11 @@ def test_collision_with_ground(env):
         "ur16e": [0.0, -0.15, 1.32, 0.0, 1.63],
     }
     env.reset()
-    action = env.ur.normalize_joint_values(collision_joint_config[env.ur.model_key])
+    action = env.unwrapped.ur.normalize_joint_values(collision_joint_config[env.unwrapped.ur.model_key])
     done = False
     while not done:
-        _, _, done, _, info = env.step(action)
+        _, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "collision"
 
 
@@ -84,9 +91,9 @@ def test_collision_with_ground(env):
 def test_reset_joint_positions(env):
     joint_positions = [0.2, -2.5, 1.1, -2.0, -1.2, 1.2]
 
-    state = env.reset(joint_positions=joint_positions)
+    state, _ = env.reset(options={"joint_positions": joint_positions})
     assert np.isclose(
-        env.ur.normalize_joint_values(joint_positions), state[3:9], atol=0.1
+        env.unwrapped.ur.normalize_joint_values(joint_positions), state[3:9], atol=0.1
     ).all()
 
 
@@ -133,17 +140,19 @@ def test_object_coordinates(env):
         },
     }
 
-    state = env.reset(
-        joint_positions=params[env.ur.model_key]["joint_positions"],
-        ee_target_pose=params[env.ur.model_key]["object_coords"],
+    state, _ = env.reset(
+        options={
+            "joint_positions": params[env.unwrapped.ur.model_key]["joint_positions"],
+            "ee_target_pose": params[env.unwrapped.ur.model_key]["object_coords"],
+        }
     )
     assert np.isclose(
-        [params[env.ur.model_key]["polar_coords"]["r"]], state[0], atol=0.05
+        [params[env.unwrapped.ur.model_key]["polar_coords"]["r"]], state[0], atol=0.05
     ).all()
     assert np.isclose(
         [
-            params[env.ur.model_key]["polar_coords"]["theta"],
-            params[env.ur.model_key]["polar_coords"]["phi"],
+            params[env.unwrapped.ur.model_key]["polar_coords"]["theta"],
+            params[env.unwrapped.ur.model_key]["polar_coords"]["phi"],
         ],
         state[1:3],
         atol=0.2,
@@ -251,7 +260,7 @@ def test_fixed_joints(
         fix_wrist_3=fix_wrist_3,
         ur_model=ur_model,
     )
-    state = env.reset()
+    state, _ = env.reset()
     initial_joint_positions = state[3:9]
     # Take 20 actions
     action = env.action_space.sample()
@@ -284,7 +293,11 @@ def test_fixed_joints(
             initial_joint_positions[5], joint_positions[5], abs_tol=0.05
         )
 
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
 
 
 @pytest.mark.commit
@@ -300,13 +313,16 @@ def test_success(env):
     }
 
     env.reset(
-        joint_positions=[0.0, -1.3, 0.0, -1.3, 0.0, 0.0],
-        ee_target_pose=params[env.ur.model_key]["object_coords"],
+        options={
+            "joint_positions": [0.0, -1.3, 0.0, -1.3, 0.0, 0.0],
+            "ee_target_pose": params[env.unwrapped.ur.model_key]["object_coords"],
+        }
     )
-    action = env.ur.normalize_joint_values([0.0, -1.57, 0.0, -1.57, 0.0])
+    action = env.unwrapped.ur.normalize_joint_values([0.0, -1.57, 0.0, -1.57, 0.0])
     done = False
     while not done:
-        _, _, done, _, info = env.step(action)
+        _, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "success"
 
 
@@ -325,15 +341,16 @@ def test_continue_on_success(env):
     env.reset(
         options={
             "joint_positions": [0.0, -1.3, 0.0, -1.3, 0.0, 0.0],
-            "ee_target_pose": params[env.ur.model_key]["object_coords"],
+            "ee_target_pose": params[env.unwrapped.ur.model_key]["object_coords"],
         }
     )
-    action = env.ur.normalize_joint_values([0.0, -1.57, 0.0, -1.57, 0.0])
+    action = env.unwrapped.ur.normalize_joint_values([0.0, -1.57, 0.0, -1.57, 0.0])
     done = False
     while not done:
-        state, _, done, _, info = env.step(action)
+        state, _, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
     assert info["final_status"] == "success"
 
     joint_positions = state[3:9]
-    state = env.reset(options={"continue_on_success": True})
+    state, _ = env.reset(options={"continue_on_success": True})
     assert np.isclose(joint_positions, state[3:9], atol=0.05).all()

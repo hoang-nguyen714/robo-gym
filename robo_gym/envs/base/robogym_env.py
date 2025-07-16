@@ -5,7 +5,12 @@ import numpy as np
 from abc import ABC, abstractmethod
 from gymnasium.core import ObsType, ActType
 from numpy.typing import NDArray
-from types import UnionType
+# Replace with this for Python 3.8 compatibility:
+try:
+    from types import UnionType
+except ImportError:
+    # For Python < 3.10
+    from typing import Union as UnionType
 from typing import Any, SupportsFloat, Tuple, Callable
 
 import robo_gym_server_modules.robot_server.client as rs_client

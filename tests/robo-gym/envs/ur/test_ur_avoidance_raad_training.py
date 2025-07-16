@@ -32,19 +32,24 @@ def env(request):
     env = gym.make("AvoidanceRaad2022URSim-v0", ip=ip, ur_model=request.param)
     env.request_param = request.param
     yield env
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
 
 
 @pytest.mark.commit
 def test_initialization(env):
-    assert env.ur.model_key == env.request_param
+    assert env.unwrapped.ur.model_key == env.request_param
     env.reset()
     done = False
     env.step([0, 0, 0, 0, 0])
     for _ in range(10):
         if not done:
             action = env.action_space.sample()
-            observation, _, done, _, _ = env.step(action)
+            observation, _, terminated, truncated, _ = env.step(action)
+            done = terminated or truncated
 
     assert env.observation_space.contains(observation)
 
@@ -57,12 +62,13 @@ def test_object_collision(env):
     }
 
     env.reset(
-        options={"fixed_object_position": params[env.ur.model_key]["object_coords"]}
+        options={"fixed_object_position": params[env.unwrapped.ur.model_key]["object_coords"]}
     )
     done = False
     i = 0
-    while (not done) or i <= params[env.ur.model_key]["n_steps"]:
-        _, _, done, _, info = env.step(np.zeros(5))
+    while (not done) or i <= params[env.unwrapped.ur.model_key]["n_steps"]:
+        _, _, terminated, truncated, info = env.step(np.zeros(5))
+        done = terminated or truncated
         i += 1
     assert info["final_status"] == "collision"
 
@@ -77,23 +83,23 @@ def test_object_coordinates(env):
         }
     }
 
-    state = env.reset(
-        options={"fixed_object_position": params[env.ur.model_key]["object_coords"]}
+    state, _ = env.reset(
+        options={"fixed_object_position": params[env.unwrapped.ur.model_key]["object_coords"]}
     )
     assert np.isclose(
         [
-            params[env.ur.model_key]["polar_coords_ee"]["r"],
-            params[env.ur.model_key]["polar_coords_ee"]["theta"],
-            params[env.ur.model_key]["polar_coords_ee"]["phi"],
+            params[env.unwrapped.ur.model_key]["polar_coords_ee"]["r"],
+            params[env.unwrapped.ur.model_key]["polar_coords_ee"]["theta"],
+            params[env.unwrapped.ur.model_key]["polar_coords_ee"]["phi"],
         ],
         state[0:3],
         atol=0.1,
     ).all()
     assert np.isclose(
         [
-            params[env.ur.model_key]["polar_coords_forearm"]["r"],
-            params[env.ur.model_key]["polar_coords_forearm"]["theta"],
-            params[env.ur.model_key]["polar_coords_forearm"]["phi"],
+            params[env.unwrapped.ur.model_key]["polar_coords_forearm"]["r"],
+            params[env.unwrapped.ur.model_key]["polar_coords_forearm"]["theta"],
+            params[env.unwrapped.ur.model_key]["polar_coords_forearm"]["phi"],
         ],
         state[15:18],
         atol=0.1,
@@ -110,7 +116,7 @@ def test_robot_trajectory(env):
 
     env.reset()
     # load trajectory
-    traj_path = robo_gym_path.joinpath(params[env.ur.model_key]["traj_relative_path"])
+    traj_path = robo_gym_path.joinpath(params[env.unwrapped.ur.model_key]["traj_relative_path"])
     with open(traj_path) as json_file:
         trajectory = json.load(json_file)["trajectory"]
 
@@ -123,7 +129,7 @@ def test_robot_trajectory(env):
         desired_joints = state[18:24]
         # check if robot follows the trajectory in all steps of trajectory segment 0
         assert np.isclose(
-            env.ur.normalize_joint_values(traj_joint_positions), ur_j_pos_norm, atol=0.1
+            env.unwrapped.ur.normalize_joint_values(traj_joint_positions), ur_j_pos_norm, atol=0.1
         ).all()
         # check if calculation of delta joints is correct
         assert np.isclose(
@@ -135,7 +141,7 @@ def test_robot_trajectory(env):
     traj_joint_positions = trajectory[1][0]
     state, _, _, _, _ = env.step(action)
     assert np.isclose(
-        env.ur.normalize_joint_values(traj_joint_positions), state[3:9], atol=0.1
+        env.unwrapped.ur.normalize_joint_values(traj_joint_positions), state[3:9], atol=0.1
     ).all()
 
 
@@ -190,7 +196,7 @@ def test_fixed_joints(
         fix_wrist_3=fix_wrist_3,
         ur_model=ur_model,
     )
-    state = env.reset()
+    state, _ = env.reset()
     initial_joint_positions = state[3:9]
     # Take 20 actions
     action = env.action_space.sample()
@@ -223,4 +229,8 @@ def test_fixed_joints(
             initial_joint_positions[5], joint_positions[5], abs_tol=0.05
         )
 
-    env.kill_sim()
+    # Access the underlying environment to call kill_sim()
+    if hasattr(env, 'kill_sim'):
+        env.kill_sim()
+    elif hasattr(env, 'unwrapped') and hasattr(env.unwrapped, 'kill_sim'):
+        env.unwrapped.kill_sim()
