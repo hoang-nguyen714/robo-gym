@@ -175,7 +175,7 @@ class URBaseEnv(gym.Env):
 
         elif self.elapsed_steps >= self.max_episode_steps:
             done = True
-            info["final_status"] = "success"
+            info["final_status"] = "max_steps_exceeded"
 
         return 0, done, info
 

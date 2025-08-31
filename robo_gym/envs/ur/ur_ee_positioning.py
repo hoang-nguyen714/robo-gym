@@ -10,7 +10,7 @@ from scipy.spatial.transform import Rotation as R
 from robo_gym.envs.simulation_wrapper import Simulation
 from robo_gym.envs.ur.ur_base_env import URBaseEnv
 from robo_gym.utils import utils
-from robo_gym.utils.exceptions import InvalidStateError, RobotServerError
+from robo_gym.utils.exceptions import InvalidStateError, RobotServerError, InvalidActionError
 from robo_gym_server_modules.robot_server.grpc_msgs.python import robot_server_pb2
 
 # base, shoulder, elbow, wrist_1, wrist_2, wrist_3
@@ -376,8 +376,42 @@ class EndEffectorPositioningUR(URBaseEnv):
 
         action = action.astype(np.float32)
 
-        state, reward, terminated, truncated, info = super().step(action)
-        done = terminated or truncated
+        # We need to do our own step logic instead of calling super().step()
+        # because we want to use our own reward method
+        self.elapsed_steps += 1
+
+        # Check if the action is contained in the action space
+        if not self.action_space.contains(action):
+            raise InvalidActionError()
+
+        # Add missing joints which were fixed at initialization
+        action = self.add_fixed_joints(action)
+
+        # Convert environment action to robot server action
+        rs_action = self.env_action_to_rs_action(action)
+
+        # Send action to Robot Server and get state
+        rs_state = self.client.send_action_get_state(rs_action.tolist()).state_dict
+        self._check_rs_state_keys(rs_state)
+
+        # Convert the state from Robot Server format to environment format
+        state = self._robot_server_state_to_env_state(rs_state)
+
+        # Check if the environment state is contained in the observation space
+        if not self.observation_space.contains(state):
+            raise InvalidStateError()
+
+        self.rs_state = rs_state
+
+        # Use our own reward method instead of the base environment's
+        reward, done, info = self.reward(rs_state=rs_state, action=action)
+        if self.rs_state_to_info:
+            info["rs_state"] = self.rs_state
+        
+        # In new Gymnasium API, separate terminated vs truncated
+        terminated = done and info.get("final_status") != "max_steps_exceeded"
+        truncated = done and info.get("final_status") == "max_steps_exceeded"
+
         self.previous_action = self.add_fixed_joints(action)
 
         if done:

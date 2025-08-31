@@ -175,7 +175,7 @@ class EndEffectorPositioningURTrainingCurriculum(gym.Wrapper):
             info['final_status'] = 'collision'
             info['target_coord'] = target_coord
 
-        if self.elapsed_steps >= self.max_episode_steps:
+        elif self.elapsed_steps >= self.max_episode_steps:
             done = True
             info['final_status'] = 'max_steps_exceeded'
             info['target_coord'] = target_coord
