@@ -47,6 +47,11 @@ VERBOSE_LOGGING = False    # Enable detailed logging during training (reduced fo
 SHOW_GUI_FOR_TESTING = True  # Show GUI when testing trained agent
 Q_TABLE_PRINT_INTERVAL = 50  # Print Q-table every N episodes (reduced frequency for performance)
 
+# Checkpoint configuration
+CHECKPOINT_INTERVAL = 100  # Save checkpoint every N episodes
+CHECKPOINT_DIR = 'checkpoints'  # Directory to store checkpoints
+RESUME_FROM_CHECKPOINT = True  # Whether to resume from latest checkpoint if available
+
 # Q-Learning parameters
 LEARNING_RATE = 0.2  # Increased for faster learning
 DISCOUNT_FACTOR = 0.95
@@ -113,6 +118,107 @@ def generate_random_points():
         dest_x, dest_y = 1.5, 1.5
     
     return [start_x, start_y, start_yaw], [dest_x, dest_y, dest_yaw]
+
+def create_checkpoint_dir():
+    """Create checkpoint directory if it doesn't exist"""
+    if not os.path.exists(CHECKPOINT_DIR):
+        os.makedirs(CHECKPOINT_DIR)
+        print(f"📁 Created checkpoint directory: {CHECKPOINT_DIR}")
+
+def save_checkpoint(agent, episode, success_count, episode_rewards, episode_lengths, error_count, reset_error_count):
+    """Save training checkpoint"""
+    create_checkpoint_dir()
+    
+    checkpoint_data = {
+        'episode': episode,
+        'q_table': dict(agent.q_table),
+        'epsilon': agent.epsilon,
+        'success_count': success_count,
+        'episode_rewards': episode_rewards,
+        'episode_lengths': episode_lengths,
+        'error_count': error_count,
+        'reset_error_count': reset_error_count,
+        'agent_config': {
+            'learning_rate': agent.learning_rate,
+            'discount_factor': agent.discount_factor,
+            'epsilon_decay': agent.epsilon_decay,
+            'epsilon_min': agent.epsilon_min
+        },
+        'training_config': {
+            'num_episodes': NUM_EPISODES,
+            'map_boundaries': [MAP_X_MIN, MAP_X_MAX, MAP_Y_MIN, MAP_Y_MAX],
+            'random_points': USE_RANDOM_POINTS
+        },
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    # Save with episode number in filename
+    checkpoint_file = os.path.join(CHECKPOINT_DIR, f'checkpoint_episode_{episode:06d}.pkl')
+    with open(checkpoint_file, 'wb') as f:
+        pickle.dump(checkpoint_data, f)
+    
+    # Also save as latest checkpoint
+    latest_checkpoint = os.path.join(CHECKPOINT_DIR, 'latest_checkpoint.pkl')
+    with open(latest_checkpoint, 'wb') as f:
+        pickle.dump(checkpoint_data, f)
+    
+    print(f"💾 Checkpoint saved: Episode {episode} (Success: {success_count}, Errors: {error_count + reset_error_count})")
+    return checkpoint_file
+
+def load_latest_checkpoint():
+    """Load the latest checkpoint if available"""
+    latest_checkpoint = os.path.join(CHECKPOINT_DIR, 'latest_checkpoint.pkl')
+    
+    if not os.path.exists(latest_checkpoint):
+        print("📂 No checkpoint found, starting fresh training")
+        return None
+    
+    try:
+        with open(latest_checkpoint, 'rb') as f:
+            checkpoint_data = pickle.load(f)
+        
+        print(f"🔄 Loading checkpoint from episode {checkpoint_data['episode']}")
+        print(f"   Success count: {checkpoint_data['success_count']}")
+        print(f"   Q-table size: {len(checkpoint_data['q_table'])}")
+        print(f"   Epsilon: {checkpoint_data['epsilon']:.3f}")
+        print(f"   Errors: {checkpoint_data['error_count'] + checkpoint_data['reset_error_count']}")
+        
+        return checkpoint_data
+    except Exception as e:
+        print(f"❌ Error loading checkpoint: {str(e)}")
+        print("📂 Starting fresh training")
+        return None
+
+def list_checkpoints():
+    """List all available checkpoints"""
+    if not os.path.exists(CHECKPOINT_DIR):
+        return []
+    
+    checkpoints = []
+    for filename in os.listdir(CHECKPOINT_DIR):
+        if filename.startswith('checkpoint_episode_') and filename.endswith('.pkl'):
+            checkpoints.append(filename)
+    
+    checkpoints.sort()  # Sort by episode number
+    return checkpoints
+
+def load_specific_checkpoint(episode_number):
+    """Load a specific checkpoint by episode number"""
+    checkpoint_file = os.path.join(CHECKPOINT_DIR, f'checkpoint_episode_{episode_number:06d}.pkl')
+    
+    if not os.path.exists(checkpoint_file):
+        print(f"❌ Checkpoint for episode {episode_number} not found")
+        return None
+    
+    try:
+        with open(checkpoint_file, 'rb') as f:
+            checkpoint_data = pickle.load(f)
+        
+        print(f"🔄 Loaded checkpoint for episode {episode_number}")
+        return checkpoint_data
+    except Exception as e:
+        print(f"❌ Error loading checkpoint for episode {episode_number}: {str(e)}")
+        return None
 
 class QLearningAgent:
     def __init__(self, action_space, learning_rate=0.1, discount_factor=0.95, 
@@ -270,6 +376,26 @@ class QLearningAgent:
         else:
             print(f"ℹ No saved Q-table found at {filename} - starting with empty Q-table")
     
+    def load_from_checkpoint(self, checkpoint_data):
+        """Load agent state from checkpoint data"""
+        if checkpoint_data is None:
+            return
+        
+        # Load Q-table
+        self.q_table = defaultdict(lambda: np.zeros(self.get_action_space_size()), checkpoint_data['q_table'])
+        
+        # Load exploration parameters
+        self.epsilon = checkpoint_data['epsilon']
+        
+        # Verify agent configuration matches
+        agent_config = checkpoint_data.get('agent_config', {})
+        if agent_config.get('learning_rate') != self.learning_rate:
+            print(f"⚠️  Learning rate mismatch: checkpoint={agent_config.get('learning_rate')}, current={self.learning_rate}")
+        
+        print(f"✓ Agent state loaded from checkpoint")
+        print(f"  Q-table entries: {len(self.q_table)}")
+        print(f"  Epsilon: {self.epsilon:.3f}")
+    
     def get_q_table_stats(self):
         """Get statistics about the current Q-table"""
         if not self.q_table:
@@ -371,6 +497,11 @@ def train_q_learning():
         print(f"  Map Range: X[{MAP_X_MIN}, {MAP_X_MAX}], Y[{MAP_Y_MIN}, {MAP_Y_MAX}]")
         print(f"  Min Distance: {MIN_START_DEST_DISTANCE}")
     print(f"  State Discretization: Distance({DISTANCE_BINS} bins), Angle({ANGLE_BINS} bins), Laser({LASER_BINS} bins)")
+    print(f"  Checkpoint Interval: {CHECKPOINT_INTERVAL} episodes")
+    print(f"  Resume from Checkpoint: {RESUME_FROM_CHECKPOINT}")
+    if os.path.exists(CHECKPOINT_DIR):
+        checkpoints = list_checkpoints()
+        print(f"  Available Checkpoints: {len(checkpoints)}")
     print(f"=" * 60)
     
     env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', 
@@ -387,20 +518,39 @@ def train_q_learning():
         epsilon_min=EPSILON_MIN
     )
     
-    # Try to load existing Q-table
-    agent.load_q_table('q_table_mir100.pkl')
-    
-    # Training metrics
+    # Initialize training metrics
     episode_rewards = []
     episode_lengths = []
     success_count = 0
     error_count = 0
     reset_error_count = 0
+    start_episode = 0
+    
+    # Try to resume from checkpoint
+    checkpoint_data = None
+    if RESUME_FROM_CHECKPOINT:
+        checkpoint_data = load_latest_checkpoint()
+    
+    if checkpoint_data:
+        # Resume from checkpoint
+        agent.load_from_checkpoint(checkpoint_data)
+        start_episode = checkpoint_data['episode'] + 1  # Continue from next episode
+        success_count = checkpoint_data['success_count']
+        episode_rewards = checkpoint_data['episode_rewards']
+        episode_lengths = checkpoint_data['episode_lengths']
+        error_count = checkpoint_data['error_count']
+        reset_error_count = checkpoint_data['reset_error_count']
+        
+        print(f"📈 Resuming training from episode {start_episode}")
+        print(f"   Previous progress: {success_count} successes, {len(episode_rewards)} episodes completed")
+    else:
+        # Start fresh - try to load existing Q-table for backwards compatibility
+        agent.load_q_table('q_table_mir100.pkl')
     
     print(f"\n🎯 Starting Q-Learning training...")
     training_start_time = datetime.now()
     
-    for episode in range(NUM_EPISODES):
+    for episode in range(start_episode, NUM_EPISODES):
         # Generate random start and destination points for each episode
         start_point, destination_point = generate_random_points()
         
@@ -506,9 +656,22 @@ def train_q_learning():
             print(f"  Q-table Size: {len(agent.q_table)} states")
             print(f"  Step Errors: {error_count}")
             print(f"  Reset Errors: {reset_error_count}")
+        
+        # Save checkpoint every CHECKPOINT_INTERVAL episodes
+        if (episode + 1) % CHECKPOINT_INTERVAL == 0:
+            try:
+                save_checkpoint(agent, episode, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
+            except Exception as e:
+                print(f"⚠️  Error saving checkpoint at episode {episode + 1}: {str(e)}")
     
     training_end_time = datetime.now()
     training_duration = training_end_time - training_start_time
+    
+    # Save final checkpoint
+    try:
+        save_checkpoint(agent, NUM_EPISODES - 1, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
+    except Exception as e:
+        print(f"⚠️  Error saving final checkpoint: {str(e)}")
     
     # Save trained Q-table
     agent.save_q_table('q_table_mir100.pkl')
