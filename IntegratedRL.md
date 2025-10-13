@@ -263,21 +263,25 @@ END
     SAFETY_CHECK    MISSION_MANAGER   EXECUTION
    (Condition)       (Selector)       (Action)
         │                │                │
-        │    ┌───────────┼──────────┐     │
-        │    │           │          │     │
-        ▼    ▼           ▼          ▼     ▼
-   [Battery  [RETURN   [CONTINUE   [LOW   [NAVIGATE
-    > 0%]    HOME]     MISSION]   BATTERY] TO_TARGET]
-              │          │          │         │
-              │          │          │         │ 
-              ▼          ▼          ▼         ▼
-        [PredicateRL] [Mission   [PredicateRL] [MotionRL]
-        [Decision]    Execution] [Decision]   [Control]
-              │          │          │         │
-              ▼          ▼          ▼         ▼
-         [MotionRL]  [MotionRL]  [Warning]  [Robot
-         [Navigate   [Navigate   [System]   Commands]
-          to Dock]   to Target]     
+        │         ┌──────┼──────┐         │
+        │         │             │         │
+        ▼         ▼             ▼         ▼
+   [Battery    [RETURN       [CONTINUE   [NAVIGATE
+    > 0%]      HOME]         MISSION]    TO_TARGET]
+               (Sequence)    (Sequence)      │
+                  │             │           │
+            ┌─────┼─────┐       │           ▼
+            │           │       │      [MotionRL]
+            ▼           ▼       ▼      [Control]
+    [PredicateRL:  [MotionRL:  [Mission    │
+     isBatteryLow]  Navigate   Execution]  ▼
+     (Condition)    to Dock]      │    [Robot
+            │       (Action)      │    Commands]
+            │           │         │
+            ▼           ▼         ▼
+      [Battery    [Navigate   [MotionRL:
+       Threshold   to Dock    Navigate to
+       Decision]   Commands]   Target]
 ```
 
 ### Behavior Tree Node Types
@@ -287,6 +291,7 @@ END
 CLASS BatteryConditionNode:
     ATTRIBUTES:
         predicate_agent ← reference to PredicateRL agent
+        node_name       ← "isBatteryLow"
     
     FUNCTION evaluate(battery_level, distance_to_dock):
         // Normalize state for PredicateRL
@@ -296,22 +301,42 @@ CLASS BatteryConditionNode:
         threshold_idx ← predicate_agent.choose_action(state)
         recommended_threshold ← thresholds[threshold_idx]  // [15,20,25,30,35,40]
         
-        // Return decision: should robot return home?
+        // Return TRUE if battery is low (triggers Return Home sequence)
         RETURN (battery_level ≤ recommended_threshold)
     END FUNCTION
 END CLASS
 ```
 
 #### **2. Action Nodes (MotionRL)**
+
+**Navigate to Dock Action:**
 ```
-CLASS NavigationActionNode:
+CLASS NavigateToDockNode:
     ATTRIBUTES:
         motion_agent ← reference to MotionRL agent
-        target_type  ← "mission" OR "return_home"
+        dock_position ← [0.0, 0.0, 0.0]  // Home charging location
     
-    FUNCTION execute(current_state, target_position):
-        // Use trained MotionRL agent for navigation
-        action_idx, action ← motion_agent.choose_action(current_state, exploit=True)
+    FUNCTION execute(current_state):
+        // Set target to dock position for charging
+        target_state ← prepare_navigation_state(current_state, dock_position)
+        action_idx, action ← motion_agent.choose_action(target_state, exploit=True)
+        
+        RETURN action  // [linear_velocity, angular_velocity]
+    END FUNCTION
+END CLASS
+```
+
+**Navigate to Target Action:**
+```
+CLASS NavigateToTargetNode:
+    ATTRIBUTES:
+        motion_agent ← reference to MotionRL agent
+        mission_target ← current mission destination
+    
+    FUNCTION execute(current_state):
+        // Navigate to current mission target
+        target_state ← prepare_navigation_state(current_state, mission_target)
+        action_idx, action ← motion_agent.choose_action(target_state, exploit=True)
         
         RETURN action  // [linear_velocity, angular_velocity]
     END FUNCTION
@@ -325,14 +350,49 @@ END CLASS
 
 ### Behavior Tree Execution Flow
 
-1. **Safety Check**: Verify robot operational status
-2. **Battery Evaluation**: PredicateRL assesses current battery/distance state
-3. **Mode Selection**:
-   - If battery ≤ threshold: Switch to "Return Home" mode
-   - If battery > threshold: Continue "Mission" mode
-4. **Action Generation**: MotionRL generates navigation commands
-5. **Safety Validation**: Verify commands are safe to execute
-6. **Command Execution**: Send validated commands to robot
+1. **Safety Check**: Verify robot operational status (battery > 0%)
+2. **Mission Manager (Selector)**: Choose between Return Home or Continue Mission
+   - **Return Home (Sequence)**:
+     - **Condition**: PredicateRL evaluates `isBatteryLow()` based on current battery/distance state
+     - **Action**: If condition true, MotionRL executes "Navigate to Dock"
+   - **Continue Mission (Sequence)**:
+     - **Action**: MotionRL executes "Navigate to Target" 
+3. **Execution**: Selected navigation commands sent to robot
+4. **Repeat**: Behavior tree ticks continuously for real-time decisions
+
+### Simplified Architecture Benefits
+
+The streamlined behavior tree structure offers several advantages:
+
+#### **🎯 Clarity and Maintainability**
+- **Clear Decision Point**: Single condition node (`isBatteryLow`) eliminates redundant logic
+- **Direct Mapping**: Each sequence directly maps to a specific robot behavior
+- **Reduced Complexity**: Fewer nodes mean easier debugging and maintenance
+
+#### **⚡ Execution Efficiency** 
+- **Faster Evaluation**: Shorter decision paths reduce computational overhead
+- **Deterministic Flow**: Clear sequence execution prevents state conflicts
+- **Real-time Performance**: Simplified logic enables faster behavior tree ticks
+
+#### **🔧 Implementation Advantages**
+- **Modular Design**: Easy to swap MotionRL agents or modify PredicateRL logic
+- **Clear Interfaces**: Well-defined inputs/outputs for each node type
+- **Testable Components**: Each sequence can be independently tested and validated
+
+#### **🧠 Logical Structure**
+```
+SELECTOR (Mission Manager):
+    ├── SEQUENCE (Return Home)
+    │   ├── CONDITION: PredicateRL.isBatteryLow()
+    │   └── ACTION: MotionRL.NavigateToDock()
+    └── SEQUENCE (Continue Mission)  
+        └── ACTION: MotionRL.NavigateToTarget()
+```
+
+This structure ensures that:
+- **PredicateRL** makes strategic decisions (WHEN to return)  
+- **MotionRL** handles tactical execution (HOW to navigate)
+- **Behavior Tree** coordinates seamless transitions between modes
 
 ## Implementation Framework
 
