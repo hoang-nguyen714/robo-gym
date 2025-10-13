@@ -1,4 +1,4 @@
-# IntegratedRL: Two-Stage Hierarchical Reinforcement Learning for Autonomous Robot Navigation
+# IntegratedRL: Two-Stage Robotic Behaviours Control using Hierarchical Reinforcement Learning for Autonomous Robot Navigation
 
 ## Table of Contents
 1. [Overview](#overview)
