@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 """
-Robot Navigation using Trained Q-Learning Agent
-==============================================
+Battery-Aware Robot Navigation using Trained Q-Learning Agent
+===========================================================
 
 This script loads a pre-trained Q-Learning model and uses it to navigate
-the MiR100 robot from a starting point to a destination while avoiding obstacles.
+the MiR100 robot from a starting point to a destination while avoiding obstacles
+and managing battery consumption efficiently.
+
+Features:
+- Battery-aware navigation with real-time energy monitoring
+- Obstacle avoidance using laser sensor data
+- Forward-only motion for improved navigation efficiency
+- Real-time battery status and efficiency tracking
 """
 
 import gymnasium as gym
@@ -19,12 +26,12 @@ from collections import defaultdict
 target_machine_ip = '127.0.0.1'  # or other machine 'xxx.xxx.xxx.xxx'
 
 # Navigation points (should match training configuration)
-START_POINT = [0.5, 0.0, 0.0]  # [x, y, yaw] - Starting position (match training)
-DESTINATION_POINT = [2.5, 2.5, 0.0]  # [x, y, yaw] - Destination position (match training)
+START_POINT = [1.0, 1.0, 0.0]  # [x, y, yaw] - Starting position (match training)
+DESTINATION_POINT = [2.0, 2.0, 0.0]  # [x, y, yaw] - Destination position (match training)
 
 # State discretization parameters (must match training)
-POSITION_BINS = 20  # Number of bins for x, y coordinates
-LASER_BINS = 5  # Number of bins for laser readings
+POSITION_BINS = 15  # Number of bins for x, y coordinates (match training)
+LASER_BINS = 3  # Number of bins for laser readings (match training)
 MAX_DISTANCE = 5.0  # Maximum distance for normalization
 
 # Navigation parameters
@@ -57,8 +64,9 @@ class TrainedQLearningAgent:
     def _create_discrete_actions(self):
         """Create discrete action set from continuous action space (must match training)"""
         actions = []
-        linear_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]
-        angular_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # Forward-only motion (matches training configuration)
+        linear_speeds = [0.0, 0.2, 0.5, 1.0]  # Only forward motion
+        angular_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Keep all angular velocities for turning
         
         for lin in linear_speeds:
             for ang in angular_speeds:
@@ -122,7 +130,7 @@ class TrainedQLearningAgent:
                 return False
         else:
             print(f"✗ Q-table file {self.q_table_file} not found")
-            print("  Please train the model first by running testing.py")
+            print("  Please train the model first by running training.py")
             print("  Using random policy instead")
             return False
 
