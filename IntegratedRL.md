@@ -269,19 +269,19 @@ END
    [Battery    [RETURN       [CONTINUE   [NAVIGATE
     > 0%]      HOME]         MISSION]    TO_TARGET]
                (Sequence)    (Sequence)      │
-                  │             │           │
-            ┌─────┼─────┐       │           ▼
-            │           │       │      [MotionRL]
-            ▼           ▼       ▼      [Control]
-    [PredicateRL:  [MotionRL:  [Mission    │
-     isBatteryLow]  Navigate   Execution]  ▼
-     (Condition)    to Dock]      │    [Robot
-            │       (Action)      │    Commands]
-            │           │         │
-            ▼           ▼         ▼
-      [Battery    [Navigate   [MotionRL:
-       Threshold   to Dock    Navigate to
-       Decision]   Commands]   Target]
+                  │             │            │
+            ┌─────┼─────┐       │            ▼
+            │           │       │       [MotionRL]
+            ▼           ▼       ▼       [Control]
+    [PredicateRL:  [MotionRL:  [Mission     │
+     isBatteryLow]  Navigate   Execution]   ▼
+     (Condition)    to Dock]      │      [Robot
+                    (Action)      │      Commands]
+                        │         │
+                        ▼         ▼
+                   [Navigate   [MotionRL:
+                   to Dock    Navigate to
+                   Commands]   Target]
 ```
 
 ### Behavior Tree Node Types
