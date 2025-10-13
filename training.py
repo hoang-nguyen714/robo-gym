@@ -52,6 +52,15 @@ CHECKPOINT_INTERVAL = 100  # Save checkpoint every N episodes
 CHECKPOINT_DIR = 'checkpoints'  # Directory to store checkpoints
 RESUME_FROM_CHECKPOINT = True  # Whether to resume from latest checkpoint if available
 
+# Early stopping configuration
+ENABLE_EARLY_STOPPING = True      # Enable early stopping mechanism
+EARLY_STOP_SUCCESS_RATE = 95.0    # Stop when success rate reaches this % over evaluation window
+EARLY_STOP_WINDOW = 200           # Number of recent episodes to evaluate for early stopping
+EARLY_STOP_MIN_EPISODES = 500     # Minimum episodes before early stopping can trigger
+EARLY_STOP_CONVERGENCE_THRESHOLD = 0.001  # Stop when Q-table changes less than this
+EARLY_STOP_CONVERGENCE_WINDOW = 100       # Episodes to check for convergence
+EARLY_STOP_PLATEAU_EPISODES = 300         # Stop if no improvement for this many episodes
+
 # Q-Learning parameters
 LEARNING_RATE = 0.2  # Increased for faster learning
 DISCOUNT_FACTOR = 0.95
@@ -188,6 +197,89 @@ def load_latest_checkpoint():
         print(f"❌ Error loading checkpoint: {str(e)}")
         print("📂 Starting fresh training")
         return None
+
+def check_early_stopping(episode, episode_rewards, q_table_history, success_count, success_history):
+    """
+    Check if training should stop early based on multiple criteria
+    
+    Args:
+        episode: Current episode number
+        episode_rewards: List of episode rewards
+        q_table_history: List of Q-table snapshots for convergence checking
+        success_count: Number of successful episodes
+        success_history: List tracking success (True/False) for each episode
+        
+    Returns:
+        tuple: (should_stop, reason)
+    """
+    if not ENABLE_EARLY_STOPPING or episode < EARLY_STOP_MIN_EPISODES:
+        return False, None
+    
+    # 1. Success Rate Criterion
+    if len(success_history) >= EARLY_STOP_WINDOW:
+        recent_successes = sum(success_history[-EARLY_STOP_WINDOW:])
+        success_rate = (recent_successes / EARLY_STOP_WINDOW) * 100
+        
+        if success_rate >= EARLY_STOP_SUCCESS_RATE:
+            return True, f"Success rate criterion met: {success_rate:.1f}% >= {EARLY_STOP_SUCCESS_RATE}% over last {EARLY_STOP_WINDOW} episodes"
+    
+    # 2. Q-table Convergence Criterion
+    if len(q_table_history) >= 2:
+        # Calculate Q-table change between recent snapshots
+        recent_change = calculate_q_table_change(q_table_history[-2], q_table_history[-1])
+        
+        if recent_change < EARLY_STOP_CONVERGENCE_THRESHOLD:
+            return True, f"Q-table convergence: change {recent_change:.6f} < {EARLY_STOP_CONVERGENCE_THRESHOLD}"
+    
+    # 3. Performance Plateau Criterion
+    if len(episode_rewards) >= EARLY_STOP_PLATEAU_EPISODES:
+        # Check if performance has plateaued (no significant improvement)
+        recent_performance = episode_rewards[-EARLY_STOP_PLATEAU_EPISODES:]
+        early_performance = recent_performance[:EARLY_STOP_PLATEAU_EPISODES//3]
+        late_performance = recent_performance[-EARLY_STOP_PLATEAU_EPISODES//3:]
+        
+        early_avg = np.mean(early_performance)
+        late_avg = np.mean(late_performance)
+        improvement = late_avg - early_avg
+        
+        # If improvement is less than 5% of the early average, consider it a plateau
+        improvement_threshold = abs(early_avg) * 0.05 if early_avg != 0 else 0.1
+        
+        if improvement < improvement_threshold:
+            return True, f"Performance plateau detected: improvement {improvement:.3f} < threshold {improvement_threshold:.3f} over {EARLY_STOP_PLATEAU_EPISODES} episodes"
+    
+    return False, None
+
+def calculate_q_table_change(old_q_table, new_q_table):
+    """Calculate the average change in Q-table values"""
+    if not old_q_table or not new_q_table:
+        return float('inf')  # Large change if tables are empty
+    
+    total_change = 0.0
+    count = 0
+    
+    # Check common states
+    for state in old_q_table:
+        if state in new_q_table:
+            old_values = np.array(list(old_q_table[state].values()))
+            new_values = np.array(list(new_q_table[state].values()))
+            
+            if len(old_values) == len(new_values):
+                change = np.mean(np.abs(new_values - old_values))
+                total_change += change
+                count += 1
+    
+    return total_change / count if count > 0 else 0.0
+
+def print_early_stopping_config():
+    """Print early stopping configuration"""
+    print("Early Stopping Configuration:")
+    print(f"  Enabled: {ENABLE_EARLY_STOPPING}")
+    if ENABLE_EARLY_STOPPING:
+        print(f"  Success Rate Target: {EARLY_STOP_SUCCESS_RATE}% over {EARLY_STOP_WINDOW} episodes")
+        print(f"  Convergence Threshold: {EARLY_STOP_CONVERGENCE_THRESHOLD}")
+        print(f"  Plateau Detection: {EARLY_STOP_PLATEAU_EPISODES} episodes")
+        print(f"  Minimum Episodes: {EARLY_STOP_MIN_EPISODES}")
 
 def list_checkpoints():
     """List all available checkpoints"""
@@ -502,6 +594,7 @@ def train_q_learning():
     if os.path.exists(CHECKPOINT_DIR):
         checkpoints = list_checkpoints()
         print(f"  Available Checkpoints: {len(checkpoints)}")
+    print_early_stopping_config()
     print(f"=" * 60)
     
     env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', 
@@ -526,6 +619,12 @@ def train_q_learning():
     reset_error_count = 0
     start_episode = 0
     
+    # Initialize early stopping metrics
+    q_table_history = []  # Store Q-table snapshots for convergence checking
+    success_history = []  # Track success/failure for each episode (True/False)
+    early_stop_triggered = False
+    early_stop_reason = None
+    
     # Try to resume from checkpoint
     checkpoint_data = None
     if RESUME_FROM_CHECKPOINT:
@@ -540,6 +639,10 @@ def train_q_learning():
         episode_lengths = checkpoint_data['episode_lengths']
         error_count = checkpoint_data['error_count']
         reset_error_count = checkpoint_data['reset_error_count']
+        
+        # Reconstruct success history from rewards (approximation for backward compatibility)
+        # Note: This is an approximation since we don't save success history in checkpoints yet
+        success_history = [reward > 0 for reward in episode_rewards]  # Rough approximation
         
         print(f"📈 Resuming training from episode {start_episode}")
         print(f"   Previous progress: {success_count} successes, {len(episode_rewards)} episodes completed")
@@ -628,7 +731,8 @@ def train_q_learning():
             state = next_state
             
             # Check for success
-            if terminated and info.get('final_status') == 'success':
+            episode_success = terminated and info.get('final_status') == 'success'
+            if episode_success:
                 success_count += 1
         
         # Decay exploration rate
@@ -637,6 +741,29 @@ def train_q_learning():
         # Store episode metrics
         episode_rewards.append(total_reward)
         episode_lengths.append(steps)
+        success_history.append(episode_success)  # Track success for early stopping
+        
+        # Store Q-table snapshot for convergence checking (every convergence window episodes)
+        if ENABLE_EARLY_STOPPING and (episode + 1) % EARLY_STOP_CONVERGENCE_WINDOW == 0:
+            # Create a deep copy of Q-table for comparison
+            q_table_snapshot = {}
+            for state, actions in agent.q_table.items():
+                q_table_snapshot[state] = dict(actions)
+            q_table_history.append(q_table_snapshot)
+            
+            # Keep only recent Q-table history to manage memory
+            if len(q_table_history) > 5:
+                q_table_history.pop(0)
+        
+        # Check for early stopping conditions
+        if ENABLE_EARLY_STOPPING and not early_stop_triggered:
+            should_stop, reason = check_early_stopping(episode, episode_rewards, q_table_history, success_count, success_history)
+            if should_stop:
+                early_stop_triggered = True
+                early_stop_reason = reason
+                print(f"\n🎯 Early stopping triggered at episode {episode + 1}!")
+                print(f"   Reason: {reason}")
+                print(f"   Training will complete after saving checkpoint...")
         
         # Print Q-table summary every N episodes
         if (episode + 1) % Q_TABLE_PRINT_INTERVAL == 0:
@@ -663,15 +790,32 @@ def train_q_learning():
                 save_checkpoint(agent, episode, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
             except Exception as e:
                 print(f"⚠️  Error saving checkpoint at episode {episode + 1}: {str(e)}")
+        
+        # Break if early stopping was triggered and checkpoint saved
+        if early_stop_triggered:
+            # Save early stopping checkpoint
+            try:
+                save_checkpoint(agent, episode, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
+                print(f"💾 Early stopping checkpoint saved at episode {episode + 1}")
+            except Exception as e:
+                print(f"⚠️  Error saving early stopping checkpoint: {str(e)}")
+            
+            # Update final episode count for reporting
+            final_episode = episode + 1
+            break
+    else:
+        # Normal completion - no early stopping
+        final_episode = NUM_EPISODES
     
     training_end_time = datetime.now()
     training_duration = training_end_time - training_start_time
     
-    # Save final checkpoint
-    try:
-        save_checkpoint(agent, NUM_EPISODES - 1, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
-    except Exception as e:
-        print(f"⚠️  Error saving final checkpoint: {str(e)}")
+    # Save final checkpoint (if not already saved due to early stopping)
+    if not early_stop_triggered:
+        try:
+            save_checkpoint(agent, final_episode - 1, success_count, episode_rewards, episode_lengths, error_count, reset_error_count)
+        except Exception as e:
+            print(f"⚠️  Error saving final checkpoint: {str(e)}")
     
     # Save trained Q-table
     agent.save_q_table('q_table_mir100.pkl')
@@ -688,17 +832,31 @@ def train_q_learning():
             'map_x_range': [MAP_X_MIN, MAP_X_MAX],
             'map_y_range': [MAP_Y_MIN, MAP_Y_MAX],
             'min_distance': MIN_START_DEST_DISTANCE,
-            'state_bins': {'distance': DISTANCE_BINS, 'angle': ANGLE_BINS, 'laser': LASER_BINS}
+            'state_bins': {'distance': DISTANCE_BINS, 'angle': ANGLE_BINS, 'laser': LASER_BINS},
+            'early_stopping': {
+                'enabled': ENABLE_EARLY_STOPPING,
+                'success_rate_target': EARLY_STOP_SUCCESS_RATE,
+                'evaluation_window': EARLY_STOP_WINDOW,
+                'min_episodes': EARLY_STOP_MIN_EPISODES,
+                'convergence_threshold': EARLY_STOP_CONVERGENCE_THRESHOLD,
+                'plateau_episodes': EARLY_STOP_PLATEAU_EPISODES
+            }
         },
         'final_results': {
             'success_count': success_count,
-            'final_success_rate': success_count / NUM_EPISODES * 100,
+            'total_episodes': final_episode,
+            'final_success_rate': success_count / final_episode * 100,
             'final_epsilon': agent.epsilon,
             'q_table_size': len(agent.q_table),
             'training_duration_seconds': training_duration.total_seconds(),
             'step_errors': error_count,
             'reset_errors': reset_error_count,
-            'error_rate': (error_count + reset_error_count) / NUM_EPISODES * 100
+            'error_rate': (error_count + reset_error_count) / final_episode * 100,
+            'early_stopping': {
+                'triggered': early_stop_triggered,
+                'reason': early_stop_reason,
+                'episode': final_episode if early_stop_triggered else None
+            }
         },
         'episode_rewards': episode_rewards,
         'episode_lengths': episode_lengths,
@@ -709,16 +867,21 @@ def train_q_learning():
         json.dump(training_log, f, indent=2)
     
     print(f"\n🎉 Training Completed!")
+    if early_stop_triggered:
+        print(f"  🎯 Early Stopping: {early_stop_reason}")
+        print(f"  Episodes Completed: {final_episode}/{NUM_EPISODES}")
+    else:
+        print(f"  Episodes Completed: {final_episode}/{NUM_EPISODES}")
     print(f"  Total Duration: {training_duration}")
-    print(f"  Final Success Rate: {success_count / NUM_EPISODES * 100:.2f}%")
+    print(f"  Final Success Rate: {success_count / final_episode * 100:.2f}%")
     print(f"  Final Q-table Size: {len(agent.q_table)} states")
     print(f"  Total Step Errors: {error_count}")
     print(f"  Total Reset Errors: {reset_error_count}")
-    print(f"  Overall Error Rate: {(error_count + reset_error_count) / NUM_EPISODES * 100:.2f}%")
+    print(f"  Overall Error Rate: {(error_count + reset_error_count) / final_episode * 100:.2f}%")
     print(f"  Training log saved to: training_log.json")
     
     # Plot training results
-    plot_training_results(episode_rewards, episode_lengths, success_count, NUM_EPISODES)
+    plot_training_results(episode_rewards, episode_lengths, success_count, final_episode)
     
     return agent, env
 
