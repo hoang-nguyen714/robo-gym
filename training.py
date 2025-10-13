@@ -1,3 +1,27 @@
+"""
+Q-Learning Training Script for MiR100 Robot Navigation with Battery Management
+
+This script implements Q-Learning to train a MiR100 robot to navigate from a starting
+point to a destination while avoiding obstacles and managing battery consumption.
+
+Features:
+- Battery-aware environment (BatteryObstacleAvoidanceMir100Sim-v0)
+- Multi-point random training for better generalization
+- Improved state representation (distance/angle vs x/y coordinates)
+- Discrete Q-Learning with enhanced state discretization
+- Epsilon-greedy exploration with decay
+- Reward shaping for better convergence
+- Progress tracking and visualization
+- Q-table persistence (save/load)
+- Headless training for faster execution
+
+Updates for Generalization:
+- Random start/destination points in range [0, 2.5] x [0, 3.5]
+- Distance-angle state representation instead of relative x,y
+- Increased episodes to 10,000 for comprehensive training
+- Enhanced state discretization with distance, angle, and laser bins
+"""
+
 import gymnasium as gym
 import robo_gym
 import numpy as np
@@ -11,9 +35,11 @@ from datetime import datetime
 # Configuration parameters
 target_machine_ip = '127.0.0.1'  # or other machine 'xxx.xxx.xxx.xxx'
 
-# Configurable starting point and destination point
-START_POINT = [1.0, 1.0, 0.0]  # [x, y, yaw] - Starting position (closer to destination)
-DESTINATION_POINT = [2.0, 2.0, 0.0]  # [x, y, yaw] - Destination position (closer to start)
+# Random multi-point training configuration
+MAP_X_MIN, MAP_X_MAX = 0.0, 2.5  # X coordinate range for random points
+MAP_Y_MIN, MAP_Y_MAX = 0.0, 3.5  # Y coordinate range for random points
+MIN_START_DEST_DISTANCE = 0.5    # Minimum distance between start and destination
+USE_RANDOM_POINTS = True          # Enable random start/destination point training
 
 # Training mode configuration
 HEADLESS_TRAINING = True  # Set to False to show Gazebo GUI during training
@@ -27,12 +53,66 @@ DISCOUNT_FACTOR = 0.95
 EPSILON = 1.0  # Initial exploration rate
 EPSILON_DECAY = 0.999  # Slower decay for more exploration
 EPSILON_MIN = 0.01
-NUM_EPISODES = 2000  # More episodes for better convergence
+NUM_EPISODES = 10000  # Increased episodes for multi-point training
 
 # State discretization parameters
 POSITION_BINS = 15  # Reduced bins for coarser discretization (faster learning)
 LASER_BINS = 3  # Reduced bins for laser readings (simpler state space)
 MAX_DISTANCE = 5.0  # Maximum distance for normalization
+DISTANCE_BINS = 10  # Number of bins for distance discretization (for improved state representation)
+ANGLE_BINS = 8     # Number of bins for angle discretization (for improved state representation)
+
+def generate_random_points():
+    """
+    Generate random start and destination points within map boundaries
+    
+    Returns:
+        tuple: (start_point, destination_point) as [x, y, yaw] lists
+    """
+    if not USE_RANDOM_POINTS:
+        # Use fixed points for comparison
+        return [1.0, 1.0, 0.0], [2.0, 2.0, 0.0]
+    
+    # Add safety margins to avoid boundary issues
+    safety_margin = 0.2
+    safe_x_min, safe_x_max = MAP_X_MIN + safety_margin, MAP_X_MAX - safety_margin
+    safe_y_min, safe_y_max = MAP_Y_MIN + safety_margin, MAP_Y_MAX - safety_margin
+    
+    # Ensure safe boundaries are valid
+    if safe_x_max <= safe_x_min:
+        safe_x_min, safe_x_max = MAP_X_MIN + 0.1, MAP_X_MAX - 0.1
+    if safe_y_max <= safe_y_min:
+        safe_y_min, safe_y_max = MAP_Y_MIN + 0.1, MAP_Y_MAX - 0.1
+    
+    # Generate random start point within safe boundaries
+    start_x = np.random.uniform(safe_x_min, safe_x_max)
+    start_y = np.random.uniform(safe_y_min, safe_y_max)
+    start_yaw = 0.0  # Keep yaw fixed for simplicity
+    
+    # Generate random destination point with minimum distance constraint
+    attempts = 0
+    max_attempts = 100
+    while attempts < max_attempts:
+        dest_x = np.random.uniform(safe_x_min, safe_x_max)
+        dest_y = np.random.uniform(safe_y_min, safe_y_max)
+        dest_yaw = 0.0  # Keep yaw fixed for simplicity
+        
+        # Check minimum distance constraint
+        distance = np.sqrt((dest_x - start_x)**2 + (dest_y - start_y)**2)
+        
+        # Also check maximum distance to avoid extremely long paths
+        max_distance = 3.0
+        if MIN_START_DEST_DISTANCE <= distance <= max_distance:
+            break
+        attempts += 1
+    
+    # If no valid pair found, use fallback points
+    if attempts >= max_attempts:
+        print(f"⚠️  Warning: Could not generate valid random points, using fallback")
+        start_x, start_y = 0.5, 0.5
+        dest_x, dest_y = 1.5, 1.5
+    
+    return [start_x, start_y, start_yaw], [dest_x, dest_y, dest_yaw]
 
 class QLearningAgent:
     def __init__(self, action_space, learning_rate=0.1, discount_factor=0.95, 
@@ -68,7 +148,10 @@ class QLearningAgent:
         return np.array(actions)
     
     def discretize_state(self, state):
-        """Convert continuous state to discrete state for Q-table indexing"""
+        """
+        Improved state discretization for better generalization
+        Uses distance and angle instead of relative x,y coordinates
+        """
         # Extract relevant features from state
         robot_x = state[0]  # Robot x position
         robot_y = state[1]  # Robot y position
@@ -80,12 +163,15 @@ class QLearningAgent:
         rel_y = target_y - robot_y
         distance_to_target = np.sqrt(rel_x**2 + rel_y**2)
         
-        # Discretize relative position
-        rel_x_bin = min(int((rel_x + MAX_DISTANCE) / (2 * MAX_DISTANCE) * POSITION_BINS), POSITION_BINS - 1)
-        rel_y_bin = min(int((rel_y + MAX_DISTANCE) / (2 * MAX_DISTANCE) * POSITION_BINS), POSITION_BINS - 1)
+        # Calculate angle to target (more generalizable than x,y coordinates)
+        angle_to_target = np.arctan2(rel_y, rel_x)
         
         # Discretize distance to target
-        distance_bin = min(int(distance_to_target / MAX_DISTANCE * POSITION_BINS), POSITION_BINS - 1)
+        distance_bin = min(int(distance_to_target / MAX_DISTANCE * DISTANCE_BINS), DISTANCE_BINS - 1)
+        
+        # Discretize angle to target (convert from [-π, π] to [0, 2π] then bin)
+        angle_normalized = (angle_to_target + np.pi) / (2 * np.pi)  # Normalize to [0, 1]
+        angle_bin = int(angle_normalized * ANGLE_BINS) % ANGLE_BINS
         
         # Get laser data (last 16 values are laser readings for ObstacleAvoidanceMir100)
         laser_data = state[-16:]  # Get last 16 laser readings
@@ -94,8 +180,8 @@ class QLearningAgent:
         min_laser = np.min(laser_data)
         min_laser_bin = min(int(min_laser / 10.0 * LASER_BINS), LASER_BINS - 1)
         
-        # Create discrete state tuple
-        discrete_state = (rel_x_bin, rel_y_bin, distance_bin, min_laser_bin)
+        # Create discrete state tuple with improved representation
+        discrete_state = (distance_bin, angle_bin, min_laser_bin)
         return discrete_state
     
     def choose_action(self, state):
@@ -280,8 +366,11 @@ def train_q_learning():
     print(f"  Verbose Logging: {VERBOSE_LOGGING}")
     print(f"  Episodes: {NUM_EPISODES}")
     print(f"  Q-table Print Interval: {Q_TABLE_PRINT_INTERVAL}")
-    print(f"  Start Point: {START_POINT}")
-    print(f"  Destination: {DESTINATION_POINT}")
+    print(f"  Random Points: {USE_RANDOM_POINTS}")
+    if USE_RANDOM_POINTS:
+        print(f"  Map Range: X[{MAP_X_MIN}, {MAP_X_MAX}], Y[{MAP_Y_MIN}, {MAP_Y_MAX}]")
+        print(f"  Min Distance: {MIN_START_DEST_DISTANCE}")
+    print(f"  State Discretization: Distance({DISTANCE_BINS} bins), Angle({ANGLE_BINS} bins), Laser({LASER_BINS} bins)")
     print(f"=" * 60)
     
     env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', 
@@ -305,36 +394,80 @@ def train_q_learning():
     episode_rewards = []
     episode_lengths = []
     success_count = 0
+    error_count = 0
+    reset_error_count = 0
     
     print(f"\n🎯 Starting Q-Learning training...")
     training_start_time = datetime.now()
     
     for episode in range(NUM_EPISODES):
+        # Generate random start and destination points for each episode
+        start_point, destination_point = generate_random_points()
+        
         # Print current episode if verbose logging is enabled
         if VERBOSE_LOGGING:
             print(f"\n🔄 Episode {episode + 1}/{NUM_EPISODES} (ε={agent.epsilon:.3f})")
+            print(f"   Start: {start_point}, Dest: {destination_point}")
         
-        # Reset environment with configured start and target positions
-        state, info = env.reset(options={
-            'start_pose': START_POINT,
-            'target_pose': DESTINATION_POINT
-        })
+        # Reset environment with random start and target positions (with error handling)
+        max_reset_attempts = 3
+        for reset_attempt in range(max_reset_attempts):
+            try:
+                state, info = env.reset(options={
+                    'start_pose': start_point,
+                    'target_pose': destination_point
+                })
+                break  # Success, exit retry loop
+            except Exception as e:
+                reset_error_count += 1
+                print(f"⚠️  Reset attempt {reset_attempt + 1} failed for episode {episode + 1}: {str(e)}")
+                if reset_attempt == max_reset_attempts - 1:
+                    print("   🛑 Max reset attempts reached, skipping episode")
+                    continue  # Skip this episode
+                else:
+                    print(f"   🔄 Retrying reset (attempt {reset_attempt + 2}/{max_reset_attempts})...")
+                    # Generate new random points for retry
+                    start_point, destination_point = generate_random_points()
         
         total_reward = 0
         steps = 0
         done = False
+        max_steps_per_episode = 500  # Prevent infinite episodes
         
-        while not done:
-            # Choose action
-            action_idx, action = agent.choose_action(state)
-            
-            # Take step in environment
-            next_state, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            
-            # Log episode details if verbose
-            if VERBOSE_LOGGING and steps < 5:  # Only log first 5 steps to avoid spam
-                log_episode_details(episode, state, action, reward, next_state, done, info)
+        while not done and steps < max_steps_per_episode:
+            try:
+                # Choose action
+                action_idx, action = agent.choose_action(state)
+                
+                # Take step in environment
+                next_state, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                
+                # Log episode details if verbose
+                if VERBOSE_LOGGING and steps < 5:  # Only log first 5 steps to avoid spam
+                    log_episode_details(episode, state, action, reward, next_state, done, info)
+                    
+            except Exception as e:
+                error_count += 1
+                print(f"⚠️  Error in episode {episode + 1}, step {steps}: {str(e)}")
+                print(f"   Action: {action}, State shape: {np.array(state).shape if 'state' in locals() else 'undefined'}")
+                
+                # Try to recover by resetting the environment
+                try:
+                    print("   🔄 Attempting environment recovery...")
+                    start_point, destination_point = generate_random_points()
+                    state, info = env.reset(options={
+                        'start_pose': start_point,
+                        'target_pose': destination_point
+                    })
+                    print("   ✅ Environment reset successful, continuing...")
+                    done = True  # End this episode and start fresh
+                    break
+                except Exception as reset_error:
+                    reset_error_count += 1
+                    print(f"   ❌ Environment reset failed: {str(reset_error)}")
+                    print("   🛑 Terminating training due to unrecoverable error")
+                    return agent, env
             
             # Update Q-table
             agent.update_q_table(state, action_idx, reward, next_state, done)
@@ -371,6 +504,8 @@ def train_q_learning():
             print(f"  Success Rate: {success_rate:.2f}%")
             print(f"  Epsilon: {agent.epsilon:.3f}")
             print(f"  Q-table Size: {len(agent.q_table)} states")
+            print(f"  Step Errors: {error_count}")
+            print(f"  Reset Errors: {reset_error_count}")
     
     training_end_time = datetime.now()
     training_duration = training_end_time - training_start_time
@@ -386,15 +521,21 @@ def train_q_learning():
             'discount_factor': DISCOUNT_FACTOR,
             'epsilon_decay': EPSILON_DECAY,
             'headless': HEADLESS_TRAINING,
-            'start_point': START_POINT,
-            'destination_point': DESTINATION_POINT
+            'random_points': USE_RANDOM_POINTS,
+            'map_x_range': [MAP_X_MIN, MAP_X_MAX],
+            'map_y_range': [MAP_Y_MIN, MAP_Y_MAX],
+            'min_distance': MIN_START_DEST_DISTANCE,
+            'state_bins': {'distance': DISTANCE_BINS, 'angle': ANGLE_BINS, 'laser': LASER_BINS}
         },
         'final_results': {
             'success_count': success_count,
             'final_success_rate': success_count / NUM_EPISODES * 100,
             'final_epsilon': agent.epsilon,
             'q_table_size': len(agent.q_table),
-            'training_duration_seconds': training_duration.total_seconds()
+            'training_duration_seconds': training_duration.total_seconds(),
+            'step_errors': error_count,
+            'reset_errors': reset_error_count,
+            'error_rate': (error_count + reset_error_count) / NUM_EPISODES * 100
         },
         'episode_rewards': episode_rewards,
         'episode_lengths': episode_lengths,
@@ -408,6 +549,9 @@ def train_q_learning():
     print(f"  Total Duration: {training_duration}")
     print(f"  Final Success Rate: {success_count / NUM_EPISODES * 100:.2f}%")
     print(f"  Final Q-table Size: {len(agent.q_table)} states")
+    print(f"  Total Step Errors: {error_count}")
+    print(f"  Total Reset Errors: {reset_error_count}")
+    print(f"  Overall Error Rate: {(error_count + reset_error_count) / NUM_EPISODES * 100:.2f}%")
     print(f"  Training log saved to: training_log.json")
     
     # Plot training results
@@ -457,7 +601,7 @@ def plot_training_results(rewards, lengths, success_count, total_episodes):
         plt.show()
 
 def test_trained_agent(agent, env, num_test_episodes=10):
-    """Test the trained agent"""
+    """Test the trained agent with random points"""
     print(f"\n🧪 Testing trained agent for {num_test_episodes} episodes...")
     
     test_rewards = []
@@ -467,9 +611,13 @@ def test_trained_agent(agent, env, num_test_episodes=10):
     agent.epsilon = 0.0
     
     for episode in range(num_test_episodes):
+        # Generate random test points
+        start_point, destination_point = generate_random_points()
+        print(f"   Test {episode+1}: {start_point} → {destination_point}")
+        
         state, info = env.reset(options={
-            'start_pose': START_POINT,
-            'target_pose': DESTINATION_POINT
+            'start_pose': start_point,
+            'target_pose': destination_point
         })
         
         total_reward = 0
