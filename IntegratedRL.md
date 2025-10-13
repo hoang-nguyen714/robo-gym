@@ -88,17 +88,17 @@ MotionRL handles **low-level navigation control**, learning how to safely naviga
 - **Physics**: Gazebo simulation with realistic dynamics
 
 ### State Space (MotionRL)
-```python
-observation_space = [
-    robot_x,           # Robot X position [-∞, +∞]
-    robot_y,           # Robot Y position [-∞, +∞] 
-    robot_yaw,         # Robot orientation [-π, +π]
-    target_x,          # Target X position [-∞, +∞]
-    target_y,          # Target Y position [-∞, +∞]
-    target_yaw,        # Target orientation [-π, +π]
-    laser_scan[0:15],  # 16-beam laser readings [0.0, 30.0]
-    battery_level      # Current battery percentage [0.0, 100.0]
-]
+```
+OBSERVATION_SPACE:
+    robot_x           ← Robot X position [-∞, +∞]
+    robot_y           ← Robot Y position [-∞, +∞] 
+    robot_yaw         ← Robot orientation [-π, +π]
+    target_x          ← Target X position [-∞, +∞]
+    target_y          ← Target Y position [-∞, +∞]
+    target_yaw        ← Target orientation [-π, +π]
+    laser_scan[0:15]  ← 16-beam laser readings [0.0, 30.0]
+    battery_level     ← Current battery percentage [0.0, 100.0]
+END
 ```
 
 **Discretized for Q-Learning**:
@@ -109,56 +109,75 @@ observation_space = [
 
 ### Action Space (MotionRL)
 **Discrete Actions**: 20 combinations of [linear_velocity, angular_velocity]
-```python
-# Optimized for forward navigation
-linear_velocities = [0.0, 0.2, 0.5, 1.0]      # Forward-only motion
-angular_velocities = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Full turning range
+```
+ACTION_SPACE:
+    // Optimized for forward navigation
+    linear_velocities  ← [0.0, 0.2, 0.5, 1.0]      // Forward-only motion
+    angular_velocities ← [-1.0, -0.5, 0.0, 0.5, 1.0]  // Full turning range
+    
+    FOR each linear_vel IN linear_velocities:
+        FOR each angular_vel IN angular_velocities:
+            CREATE action_combination(linear_vel, angular_vel)
+    END FOR
+END
 ```
 
 ### Reward Function (MotionRL)
-```python
-def calculate_reward(state, action, next_state, info):
-    reward = 0.0
+```
+FUNCTION calculate_reward(state, action, next_state, info):
+    reward ← 0.0
     
-    # Distance-based reward (encourages progress toward target)
-    distance_reward = -50.0 * euclidean_distance(robot_pos, target_pos)
+    // Distance-based reward (encourages progress toward target)
+    distance_reward ← -50.0 × euclidean_distance(robot_pos, target_pos)
     
-    # Battery consumption penalty (encourages efficiency)
-    battery_penalty = -0.5 * total_battery_drain
+    // Battery consumption penalty (encourages efficiency)
+    battery_penalty ← -0.5 × total_battery_drain
     
-    # Low battery warning penalties
-    if battery_level < 20.0:
-        reward -= 2.0  # Increased penalty for low battery
-    if battery_level < 5.0:
-        reward -= 10.0  # Critical battery penalty
+    // Low battery warning penalties
+    IF battery_level < 20.0 THEN
+        reward ← reward - 2.0    // Increased penalty for low battery
+    END IF
     
-    # Task completion rewards
-    if task_completed:
-        reward += 100.0  # Success bonus
-        if battery_level > 50.0:
-            reward += (battery_level - 50) * 0.5  # Efficiency bonus
+    IF battery_level < 5.0 THEN
+        reward ← reward - 10.0   // Critical battery penalty
+    END IF
     
-    # Safety penalties
-    if collision_detected:
-        reward -= 200.0  # Collision penalty
-    if min_laser_reading < safety_threshold:
-        reward -= 10.0   # Proximity penalty
+    // Task completion rewards
+    IF task_completed THEN
+        reward ← reward + 100.0  // Success bonus
+        IF battery_level > 50.0 THEN
+            reward ← reward + (battery_level - 50) × 0.5  // Efficiency bonus
+        END IF
+    END IF
     
-    # Battery depletion termination
-    if battery_level <= 0.0:
-        reward -= 100.0  # Depletion penalty
+    // Safety penalties
+    IF collision_detected THEN
+        reward ← reward - 200.0  // Collision penalty
+    END IF
     
-    return reward
+    IF min_laser_reading < safety_threshold THEN
+        reward ← reward - 10.0   // Proximity penalty
+    END IF
+    
+    // Battery depletion termination
+    IF battery_level ≤ 0.0 THEN
+        reward ← reward - 100.0  // Depletion penalty
+    END IF
+    
+    RETURN reward
+END FUNCTION
 ```
 
 ### Learning Parameters (MotionRL)
-```python
-LEARNING_RATE = 0.2        # Q-value update step size
-DISCOUNT_FACTOR = 0.95     # Future reward importance
-EPSILON = 1.0              # Initial exploration rate
-EPSILON_DECAY = 0.999      # Exploration decay rate
-EPSILON_MIN = 0.01         # Minimum exploration rate
-NUM_EPISODES = 2000        # Training episodes
+```
+HYPERPARAMETERS:
+    LEARNING_RATE    ← 0.2     // Q-value update step size
+    DISCOUNT_FACTOR  ← 0.95    // Future reward importance
+    EPSILON          ← 1.0     // Initial exploration rate
+    EPSILON_DECAY    ← 0.999   // Exploration decay rate
+    EPSILON_MIN      ← 0.01    // Minimum exploration rate
+    NUM_EPISODES     ← 2000    // Training episodes
+END
 ```
 
 ## Stage 2: PredicateRL - Decision Making
@@ -168,11 +187,13 @@ PredicateRL serves as the **high-level decision maker**, learning optimal batter
 
 ### State Space (PredicateRL)
 **Continuous State**: `[normalized_battery_level, normalized_distance_to_dock]`
-```python
-state_space = [
-    battery_level / 100.0,           # Normalized battery [0.0, 1.0]
-    min(distance_to_dock / 10.0, 1.0)  # Normalized distance [0.0, 1.0]
-]
+```
+STATE_SPACE:
+    normalized_battery   ← battery_level ÷ 100.0              // Range [0.0, 1.0]
+    normalized_distance  ← min(distance_to_dock ÷ 10.0, 1.0)  // Range [0.0, 1.0]
+    
+    state_vector ← [normalized_battery, normalized_distance]
+END
 ```
 
 **Discretized for Q-Learning**:
@@ -181,8 +202,18 @@ state_space = [
 
 ### Action Space (PredicateRL)
 **Discrete Battery Thresholds**: 6 threshold options
-```python
-battery_thresholds = [15, 20, 25, 30, 35, 40]  # Percentage levels
+```
+ACTION_SPACE:
+    battery_thresholds ← [15, 20, 25, 30, 35, 40]  // Percentage levels
+    
+    action_mapping:
+        ACTION_0 ← threshold_15_percent   // Risky, maximum mission time
+        ACTION_1 ← threshold_20_percent   // Balanced risk/mission
+        ACTION_2 ← threshold_25_percent   // Conservative
+        ACTION_3 ← threshold_30_percent   // Safe
+        ACTION_4 ← threshold_35_percent   // Very safe
+        ACTION_5 ← threshold_40_percent   // Ultra-conservative
+END
 ```
 
 **Action Interpretation**:
@@ -194,26 +225,30 @@ battery_thresholds = [15, 20, 25, 30, 35, 40]  # Percentage levels
 - **Action 5**: Return home when battery ≤ 40% (ultra-conservative)
 
 ### Reward Function (PredicateRL)
-```python
-def calculate_predicate_reward(mission_status, battery_status):
-    if mission_completed and returned_home_safely:
-        return +20.0  # Successful mission completion
-    elif returned_home_prematurely:
-        return -10.0  # Premature return (mission incomplete)
-    elif battery_depleted_before_docking:
-        return -100.0 # Failed to reach dock (critical failure)
-    else:
-        return -1.0   # Step cost (encourages efficiency)
+```
+FUNCTION calculate_predicate_reward(mission_status, battery_status):
+    IF (mission_completed AND returned_home_safely) THEN
+        RETURN +20.0    // Successful mission completion
+    ELSIF returned_home_prematurely THEN
+        RETURN -10.0    // Premature return (mission incomplete)
+    ELSIF battery_depleted_before_docking THEN
+        RETURN -100.0   // Failed to reach dock (critical failure)
+    ELSE
+        RETURN -1.0     // Step cost (encourages efficiency)
+    END IF
+END FUNCTION
 ```
 
 ### Learning Parameters (PredicateRL)
-```python
-LEARNING_RATE = 0.1        # Slower learning for strategic decisions
-DISCOUNT_FACTOR = 0.95     # Long-term reward focus
-EPSILON = 1.0              # Initial exploration rate
-EPSILON_DECAY = 0.995      # Slower decay for thorough exploration
-EPSILON_MIN = 0.01         # Minimum exploration rate
-NUM_EPISODES = 1000        # Training episodes
+```
+HYPERPARAMETERS:
+    LEARNING_RATE    ← 0.1     // Slower learning for strategic decisions
+    DISCOUNT_FACTOR  ← 0.95    // Long-term reward focus
+    EPSILON          ← 1.0     // Initial exploration rate
+    EPSILON_DECAY    ← 0.995   // Slower decay for thorough exploration
+    EPSILON_MIN      ← 0.01    // Minimum exploration rate
+    NUM_EPISODES     ← 1000    // Training episodes
+END
 ```
 
 ## Behavior Trees Integration
@@ -248,31 +283,39 @@ NUM_EPISODES = 1000        # Training episodes
 ### Behavior Tree Node Types
 
 #### **1. Condition Nodes (PredicateRL)**
-```python
-class BatteryConditionNode:
-    def __init__(self, predicate_agent):
-        self.predicate_agent = predicate_agent
+```
+CLASS BatteryConditionNode:
+    ATTRIBUTES:
+        predicate_agent ← reference to PredicateRL agent
     
-    def evaluate(self, battery_level, distance_to_dock):
-        state = [battery_level/100.0, min(distance_to_dock/10.0, 1.0)]
-        threshold_idx = self.predicate_agent.choose_action(state)
-        recommended_threshold = [15,20,25,30,35,40][threshold_idx]
+    FUNCTION evaluate(battery_level, distance_to_dock):
+        // Normalize state for PredicateRL
+        state ← [battery_level ÷ 100.0, min(distance_to_dock ÷ 10.0, 1.0)]
         
-        return battery_level <= recommended_threshold
+        // Get threshold recommendation from PredicateRL
+        threshold_idx ← predicate_agent.choose_action(state)
+        recommended_threshold ← thresholds[threshold_idx]  // [15,20,25,30,35,40]
+        
+        // Return decision: should robot return home?
+        RETURN (battery_level ≤ recommended_threshold)
+    END FUNCTION
+END CLASS
 ```
 
 #### **2. Action Nodes (MotionRL)**
-```python
-class NavigationActionNode:
-    def __init__(self, motion_agent, target_type="mission"):
-        self.motion_agent = motion_agent
-        self.target_type = target_type
+```
+CLASS NavigationActionNode:
+    ATTRIBUTES:
+        motion_agent ← reference to MotionRL agent
+        target_type  ← "mission" OR "return_home"
     
-    def execute(self, current_state, target_position):
-        action_idx, action = self.motion_agent.choose_action(
-            current_state, exploit=True
-        )
-        return action  # [linear_vel, angular_vel]
+    FUNCTION execute(current_state, target_position):
+        // Use trained MotionRL agent for navigation
+        action_idx, action ← motion_agent.choose_action(current_state, exploit=True)
+        
+        RETURN action  // [linear_velocity, angular_velocity]
+    END FUNCTION
+END CLASS
 ```
 
 #### **3. Composite Nodes (Executive Control)**
@@ -402,101 +445,110 @@ python integrated_training.py
 
 ### Integrated System Controller
 
-```python
-class IntegratedRLController:
-    """
-    Main controller integrating PredicateRL and MotionRL
-    with Behavior Tree executive coordination
-    """
+```
+CLASS IntegratedRLController:
+    // Main controller integrating PredicateRL and MotionRL
+    // with Behavior Tree executive coordination
     
-    def __init__(self):
-        # Load trained agents
-        self.motion_agent = MotionRLAgent()
-        self.motion_agent.load_q_table('q_table_mir100.pkl')
+    ATTRIBUTES:
+        motion_agent      ← MotionRL agent instance
+        predicate_agent   ← PredicateRL agent instance
+        behavior_tree     ← BehaviorTree controller instance
+        current_mode      ← "standby"  // standby/mission/returning_home
+        mission_queue     ← empty list of missions
+        dock_position     ← [0.0, 0.0, 0.0]
+    
+    FUNCTION initialize():
+        // Load trained agents
+        motion_agent.load_q_table('q_table_mir100.pkl')
+        predicate_agent.load_q_table('predicate_q_table.pkl')
         
-        self.predicate_agent = PredicateRLAgent() 
-        self.predicate_agent.load_q_table('predicate_q_table.pkl')
+        // Initialize behavior tree
+        behavior_tree ← CREATE BehaviorTreeController()
+    END FUNCTION
         
-        # Initialize behavior tree
-        self.behavior_tree = BehaviorTreeController()
-        
-        # System state
-        self.current_mode = "standby"  # standby/mission/returning_home
-        self.mission_queue = []
-        self.dock_position = [0.0, 0.0, 0.0]
-        
-    def execute_mission_cycle(self):
-        """Main execution loop with behavior tree coordination"""
-        while self.mission_queue:
-            # Behavior tree tick
-            tree_status = self.behavior_tree.tick()
+    FUNCTION execute_mission_cycle():
+        // Main execution loop with behavior tree coordination
+        WHILE mission_queue IS NOT EMPTY:
+            // Behavior tree tick
+            tree_status ← behavior_tree.tick()
             
-            if tree_status == "SUCCESS":
-                # Mission completed successfully
-                self.handle_mission_completion()
-            elif tree_status == "RUNNING":
-                # Continue current behavior
-                continue  
-            elif tree_status == "FAILURE":
-                # Handle mission failure
-                self.handle_mission_failure()
+            IF tree_status = "SUCCESS" THEN
+                // Mission completed successfully
+                CALL handle_mission_completion()
+            ELSIF tree_status = "RUNNING" THEN
+                // Continue current behavior
+                CONTINUE  
+            ELSIF tree_status = "FAILURE" THEN
+                // Handle mission failure
+                CALL handle_mission_failure()
+            END IF
+        END WHILE
+    END FUNCTION
+END CLASS
 ```
 
 ### Real-time Decision Making
 
-```python
-def make_navigation_decision(self, robot_state):
-    """
-    Coordinate PredicateRL and MotionRL for navigation decisions
-    """
-    # Extract current state information
-    battery_level = robot_state['battery_level']
-    robot_position = robot_state['position']
-    distance_to_dock = calculate_distance(robot_position, self.dock_position)
+```
+FUNCTION make_navigation_decision(robot_state):
+    // Coordinate PredicateRL and MotionRL for navigation decisions
     
-    # PredicateRL: Evaluate if robot should return home
-    predicate_state = [
-        battery_level / 100.0,
-        min(distance_to_dock / 10.0, 1.0)
+    // Extract current state information
+    battery_level ← robot_state['battery_level']
+    robot_position ← robot_state['position']
+    distance_to_dock ← calculate_distance(robot_position, dock_position)
+    
+    // PredicateRL: Evaluate if robot should return home
+    predicate_state ← [
+        battery_level ÷ 100.0,
+        min(distance_to_dock ÷ 10.0, 1.0)
     ]
     
-    threshold_idx = self.predicate_agent.choose_action(predicate_state)
-    recommended_threshold = self.predicate_agent.battery_thresholds[threshold_idx]
+    threshold_idx ← predicate_agent.choose_action(predicate_state)
+    recommended_threshold ← predicate_agent.battery_thresholds[threshold_idx]
     
-    # Decision: Return home or continue mission?
-    if battery_level <= recommended_threshold:
-        if self.current_mode != "returning_home":
-            self.initiate_return_home()
-            return "RETURNING_HOME"
+    // Decision: Return home or continue mission?
+    IF battery_level ≤ recommended_threshold THEN
+        IF current_mode ≠ "returning_home" THEN
+            CALL initiate_return_home()
+            RETURN "RETURNING_HOME"
+        END IF
+    END IF
     
-    # MotionRL: Generate navigation action
-    motion_state = self.prepare_motion_state(robot_state)
-    action_idx, action = self.motion_agent.choose_action(motion_state, exploit=True)
+    // MotionRL: Generate navigation action
+    motion_state ← prepare_motion_state(robot_state)
+    action_idx, action ← motion_agent.choose_action(motion_state, exploit=True)
     
-    return action  # [linear_velocity, angular_velocity]
+    RETURN action  // [linear_velocity, angular_velocity]
+END FUNCTION
 ```
 
 ### Safety Integration
 
-```python
-class SafetyController:
-    """Safety validation and override system"""
+```
+CLASS SafetyController:
+    // Safety validation and override system
     
-    def validate_action(self, action, robot_state):
-        """Validate and potentially override navigation commands"""
+    FUNCTION validate_action(action, robot_state):
+        // Validate and potentially override navigation commands
         
-        # Emergency battery check
-        if robot_state['battery_level'] < 5.0:
-            return self.emergency_dock_action(robot_state)
+        // Emergency battery check
+        IF robot_state['battery_level'] < 5.0 THEN
+            RETURN emergency_dock_action(robot_state)
+        END IF
         
-        # Collision avoidance check  
-        if min(robot_state['laser_readings']) < 0.3:
-            return self.collision_avoidance_action(robot_state)
+        // Collision avoidance check  
+        IF min(robot_state['laser_readings']) < 0.3 THEN
+            RETURN collision_avoidance_action(robot_state)
+        END IF
         
-        # Velocity limits check
-        action = self.enforce_velocity_limits(action)
+        // Velocity limits check
+        action ← enforce_velocity_limits(action)
         
-        return action  # Validated or modified action
+        RETURN action  // Validated or modified action
+    END FUNCTION
+END CLASS
 ```
 
 ## Performance Metrics
@@ -582,33 +634,33 @@ python system_monitor.py
 ### Configuration Examples
 
 #### **Conservative Mission Profile** 
-```python
-# High safety, lower productivity
-predicate_config = {
-    'preferred_thresholds': [30, 35, 40],  # Conservative battery levels
-    'mission_priority': 'safety_first',
-    'max_missions_per_cycle': 2
-}
+```
+CONFIGURATION conservative_mission_profile:
+    // High safety, lower productivity
+    preferred_thresholds   ← [30, 35, 40]  // Conservative battery levels
+    mission_priority       ← 'safety_first'
+    max_missions_per_cycle ← 2
+END CONFIGURATION
 ```
 
 #### **Aggressive Mission Profile**
-```python  
-# Higher productivity, calculated risks
-predicate_config = {
-    'preferred_thresholds': [15, 20, 25],  # Aggressive battery usage
-    'mission_priority': 'productivity_focused', 
-    'max_missions_per_cycle': 4
-}
+```
+CONFIGURATION aggressive_mission_profile:
+    // Higher productivity, calculated risks
+    preferred_thresholds   ← [15, 20, 25]  // Aggressive battery usage
+    mission_priority       ← 'productivity_focused'
+    max_missions_per_cycle ← 4
+END CONFIGURATION
 ```
 
 #### **Adaptive Mission Profile**
-```python
-# Dynamic adaptation based on conditions
-predicate_config = {
-    'adaptive_thresholds': True,
-    'mission_priority': 'balanced',
-    'context_awareness': True
-}
+```
+CONFIGURATION adaptive_mission_profile:
+    // Dynamic adaptation based on conditions
+    adaptive_thresholds ← True
+    mission_priority    ← 'balanced'
+    context_awareness   ← True
+END CONFIGURATION
 ```
 
 ## Troubleshooting
@@ -658,11 +710,13 @@ LASER_BINS = 5          # Increase for better obstacle detection
 ### System Integration Issues (Future)
 
 #### **Behavior Tree Execution**
-```python
-# Debug behavior tree state
-print(f"Current BT Status: {behavior_tree.get_status()}")
-print(f"Active Nodes: {behavior_tree.get_active_nodes()}")
-print(f"Failed Nodes: {behavior_tree.get_failed_nodes()}")
+```
+DEBUG_COMMANDS behavior_tree_diagnostics:
+    // Debug behavior tree state
+    PRINT "Current BT Status: " + behavior_tree.get_status()
+    PRINT "Active Nodes: " + behavior_tree.get_active_nodes()
+    PRINT "Failed Nodes: " + behavior_tree.get_failed_nodes()
+END DEBUG_COMMANDS
 ```
 
 #### **Performance Monitoring**
