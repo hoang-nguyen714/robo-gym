@@ -15,7 +15,7 @@
 
 ## Overview
 
-This project implements a **hierarchical two-stage reinforcement learning system** for autonomous robot navigation with intelligent battery management. The system combines **behavior trees** for high-level decision making with **Q-Learning** for low-level control, ensuring safe and efficient robot operations.
+This project implements a **hierarchical two-stage control system** for autonomous robot navigation with intelligent battery management. The system combines **behavior trees** for high-level decision making with **Q-Learning** for low-level control, ensuring safe and efficient robot operations.
 
 ### Key Features
 - **Two-Stage Learning Architecture**: Separate training for decision making and motion control
