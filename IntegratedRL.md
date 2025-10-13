@@ -1,4 +1,4 @@
-# IntegratedRL: Two-Stage Hierarchical Reinforcement Learning for Autonomous Robot Navigation
+# IntegratedRL: Two-Stage Robotic Behaviours Control using Hierarchical Reinforcement Learning for Autonomous Robot Navigation
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -15,7 +15,7 @@
 
 ## Overview
 
-This project implements a **hierarchical two-stage reinforcement learning system** for autonomous robot navigation with intelligent battery management. The system combines **behavior trees** for high-level decision making with **Q-Learning** for low-level control, ensuring safe and efficient robot operations.
+This project implements a **hierarchical two-stage control system** for autonomous robot navigation with intelligent battery management. The system combines **behavior trees** for high-level decision making with **Q-Learning** for low-level control, ensuring safe and efficient robot operations.
 
 ### Key Features
 - **Two-Stage Learning Architecture**: Separate training for decision making and motion control
@@ -269,19 +269,19 @@ END
    [Battery    [RETURN       [CONTINUE   [NAVIGATE
     > 0%]      HOME]         MISSION]    TO_TARGET]
                (Sequence)    (Sequence)      │
-                  │             │           │
-            ┌─────┼─────┐       │           ▼
-            │           │       │      [MotionRL]
-            ▼           ▼       ▼      [Control]
-    [PredicateRL:  [MotionRL:  [Mission    │
-     isBatteryLow]  Navigate   Execution]  ▼
-     (Condition)    to Dock]      │    [Robot
-            │       (Action)      │    Commands]
-            │           │         │
-            ▼           ▼         ▼
-      [Battery    [Navigate   [MotionRL:
-       Threshold   to Dock    Navigate to
-       Decision]   Commands]   Target]
+                  │             │            │
+            ┌─────┼─────┐       │            ▼
+            │           │       │       [MotionRL]
+            ▼           ▼       ▼       [Control]
+    [PredicateRL:  [MotionRL:  [Mission     │
+     isBatteryLow]  Navigate   Execution]   ▼
+     (Condition)    to Dock]      │      [Robot
+                    (Action)      │      Commands]
+                        │         │
+                        ▼         ▼
+                   [Navigate   [MotionRL:
+                   to Dock    Navigate to
+                   Commands]   Target]
 ```
 
 ### Behavior Tree Node Types
