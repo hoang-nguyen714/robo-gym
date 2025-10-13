@@ -465,6 +465,16 @@ class NoObstacleNavigationMir100Rob(NoObstacleNavigationMir100):
 class ObstacleAvoidanceMir100(Mir100Env):
     laser_len = 16
 
+    def __init__(self, rs_address=None, **kwargs):
+        super().__init__(rs_address, **kwargs)
+        # Battery management parameters
+        self.initial_battery = 100.0  # Initial battery percentage
+        self.current_battery = self.initial_battery
+        self.battery_drain_linear = 0.05  # Battery drain per linear velocity unit
+        self.battery_drain_angular = 0.02  # Battery drain per angular velocity unit
+        self.battery_drain_idle = 0.001   # Battery drain when idle
+        self.low_battery_threshold = 20.0  # Low battery warning threshold
+
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[np.ndarray, dict[str, Any]]:

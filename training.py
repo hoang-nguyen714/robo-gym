@@ -12,26 +12,26 @@ from datetime import datetime
 target_machine_ip = '127.0.0.1'  # or other machine 'xxx.xxx.xxx.xxx'
 
 # Configurable starting point and destination point
-START_POINT = [0.5, 0.0, 0.0]  # [x, y, yaw] - Starting position
-DESTINATION_POINT = [2.5, 2.5, 0.0]  # [x, y, yaw] - Destination position
+START_POINT = [1.0, 1.0, 0.0]  # [x, y, yaw] - Starting position (closer to destination)
+DESTINATION_POINT = [2.0, 2.0, 0.0]  # [x, y, yaw] - Destination position (closer to start)
 
 # Training mode configuration
 HEADLESS_TRAINING = True  # Set to False to show Gazebo GUI during training
-VERBOSE_LOGGING = True    # Enable detailed logging during training
+VERBOSE_LOGGING = False    # Enable detailed logging during training (reduced for performance)
 SHOW_GUI_FOR_TESTING = True  # Show GUI when testing trained agent
-Q_TABLE_PRINT_INTERVAL = 10  # Print Q-table every N episodes
+Q_TABLE_PRINT_INTERVAL = 50  # Print Q-table every N episodes (reduced frequency for performance)
 
 # Q-Learning parameters
-LEARNING_RATE = 0.1
+LEARNING_RATE = 0.2  # Increased for faster learning
 DISCOUNT_FACTOR = 0.95
 EPSILON = 1.0  # Initial exploration rate
-EPSILON_DECAY = 0.995
+EPSILON_DECAY = 0.999  # Slower decay for more exploration
 EPSILON_MIN = 0.01
-NUM_EPISODES = 1000
+NUM_EPISODES = 2000  # More episodes for better convergence
 
 # State discretization parameters
-POSITION_BINS = 20  # Number of bins for x, y coordinates
-LASER_BINS = 5  # Number of bins for laser readings
+POSITION_BINS = 15  # Reduced bins for coarser discretization (faster learning)
+LASER_BINS = 3  # Reduced bins for laser readings (simpler state space)
 MAX_DISTANCE = 5.0  # Maximum distance for normalization
 
 class QLearningAgent:
@@ -57,8 +57,9 @@ class QLearningAgent:
         """Create discrete action set from continuous action space"""
         # Define a set of discrete actions [linear_velocity, angular_velocity]
         actions = []
-        linear_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]
-        angular_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # Remove negative linear velocities - only forward motion for better navigation
+        linear_speeds = [0.0, 0.2, 0.5, 1.0]  # Only forward motion
+        angular_speeds = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Keep all angular velocities for turning
         
         for lin in linear_speeds:
             for ang in angular_speeds:
@@ -110,21 +111,44 @@ class QLearningAgent:
         
         return action_idx, self.discrete_actions[action_idx]
     
+    def shape_reward(self, state, next_state, original_reward):
+        """Add reward shaping to guide robot towards target"""
+        # Calculate distances to target
+        current_dist = np.sqrt((state[2] - state[0])**2 + (state[3] - state[1])**2)
+        next_dist = np.sqrt((next_state[2] - next_state[0])**2 + (next_state[3] - next_state[1])**2)
+        
+        # Reward for getting closer to target
+        distance_reward = (current_dist - next_dist) * 10  # Scale factor for distance improvement
+        
+        # Penalty for being too far from target
+        distance_penalty = -next_dist * 0.1
+        
+        # Combine original reward with shaped rewards
+        shaped_reward = original_reward + distance_reward + distance_penalty
+        
+        return shaped_reward
+    
     def update_q_table(self, state, action_idx, reward, next_state, done):
         """Update Q-table using Q-learning formula"""
         discrete_state = self.discretize_state(state)
         discrete_next_state = self.discretize_state(next_state)
+        
+        # Apply reward shaping to help guide learning
+        if not done:
+            shaped_reward = self.shape_reward(state, next_state, reward)
+        else:
+            shaped_reward = reward  # Keep terminal rewards unchanged
         
         # Current Q-value
         current_q = self.q_table[discrete_state][action_idx]
         
         if done:
             # Terminal state
-            target_q = reward
+            target_q = shaped_reward
         else:
             # Q-learning update rule
             next_max_q = np.max(self.q_table[discrete_next_state])
-            target_q = reward + self.discount_factor * next_max_q
+            target_q = shaped_reward + self.discount_factor * next_max_q
         
         # Update Q-value
         self.q_table[discrete_state][action_idx] += self.learning_rate * (target_q - current_q)
@@ -229,9 +253,20 @@ def log_episode_details(episode, state, action, reward, next_state, done, info):
         print(f"  Distance to Target: {distance:.2f}m")
         print(f"  Action: [Linear: {action[0]:.1f}, Angular: {action[1]:.1f}]")
         print(f"  Reward: {reward:.2f}")
+        
+        # Battery information logging (if available)
+        if 'battery_level' in info:
+            battery_status = info.get('battery_status', 'unknown')
+            battery_consumption = info.get('battery_consumption', {})
+            print(f"  🔋 Battery Level: {info['battery_level']:.1f}% ({battery_status})")
+            if battery_consumption:
+                print(f"     Battery Drain: {battery_consumption.get('total_drain', 0):.4f}%")
+        
         if done:
             final_status = info.get('final_status', 'unknown')
             print(f"  ✓ Episode Completed - Status: {final_status}")
+            if 'battery_level' in info:
+                print(f"  🔋 Final Battery Level: {info['battery_level']:.1f}%")
         print()
 
 def train_q_learning():
@@ -249,7 +284,7 @@ def train_q_learning():
     print(f"  Destination: {DESTINATION_POINT}")
     print(f"=" * 60)
     
-    env = gym.make('ObstacleAvoidanceMir100Sim-v0', 
+    env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', 
                    ip=target_machine_ip, 
                    gui=not HEADLESS_TRAINING)  # GUI disabled for headless training
     
@@ -474,7 +509,7 @@ if __name__ == "__main__":
     # Create a new environment for testing (with GUI if enabled)
     if SHOW_GUI_FOR_TESTING:
         print(f"\n🖥️ Creating test environment with GUI enabled...")
-        test_env = gym.make('ObstacleAvoidanceMir100Sim-v0', 
+        test_env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', 
                            ip=target_machine_ip, 
                            gui=True)
         

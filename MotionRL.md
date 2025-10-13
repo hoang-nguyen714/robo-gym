@@ -43,13 +43,14 @@ pip install -e .
 
 ### Environment Configuration
 
-The training uses the `ObstacleAvoidanceMir100Sim-v0` environment which provides:
+The training uses the **Battery-Aware** `BatteryObstacleAvoidanceMir100Sim-v0` environment which provides:
 
-- **Robot**: MiR100 mobile robot
+- **Robot**: MiR100 mobile robot with battery management system
 - **World**: Lab environment (6x8m) with obstacles
 - **Sensors**: 16-beam laser scanner
-- **Action Space**: Continuous [linear_velocity, angular_velocity]
+- **Action Space**: Discrete forward-only actions [linear_velocity: 0.0-1.0, angular_velocity: -1.0 to 1.0]
 - **Observation Space**: Robot pose, target pose, laser readings
+- **Battery System**: Real-time energy consumption tracking (0-100%)
 
 ### ROS Environment Setup
 
@@ -179,13 +180,19 @@ procedure NAVIGATE_WITH_TRAINED_POLICY(Q_table, start_point, destination_point)
 end procedure
 ```
 
-### Reward Structure
+### Reward Structure (Battery-Aware)
 
 The environment provides rewards based on:
 
 - **Distance to target**: -50 × euclidean_distance (encourages moving toward goal)
-- **Power consumption**: -|linear_velocity| × 0.30 - |angular_velocity| × 0.03
+- **Battery consumption**: -0.5 × total_battery_drain (encourages energy efficiency)
+  - Linear movement drain: 0.08% per velocity unit per step
+  - Angular movement drain: 0.03% per velocity unit per step
+  - Idle consumption: 0.005% per step (sensors, computation)
+- **Low battery penalty**: Additional penalty when battery < 20%
+- **Critical battery penalty**: -10.0 when battery < 5%
 - **Success**: +100 (reaching target within 0.2m threshold)
+- **Efficiency bonus**: +(battery_level - 50) × 0.5 when completing with >50% battery
 - **Collision**: -200 (hitting obstacles or laser threshold violation)
 
 ### Termination Conditions
@@ -194,6 +201,7 @@ The environment provides rewards based on:
   - Robot reaches target (success)
   - Robot collides with obstacle (failure)
   - Minimum laser reading below threshold (too close to obstacle)
+  - Battery depleted (0% battery) - NEW
 
 - **truncated = True**:
   - Maximum episode steps exceeded (500 steps)
@@ -203,49 +211,67 @@ The environment provides rewards based on:
 ### State Discretization Parameters
 
 ```python
-POSITION_BINS = 20      # Discretization for x, y coordinates
-LASER_BINS = 5          # Discretization for laser readings
+POSITION_BINS = 15      # Discretization for x, y coordinates (reduced for faster learning)
+LASER_BINS = 3          # Discretization for laser readings (simplified)
 MAX_DISTANCE = 5.0      # Maximum distance for normalization
 ```
 
-### Q-Learning Hyperparameters
+### Q-Learning Hyperparameters (Optimized)
 
 ```python
-LEARNING_RATE = 0.1     # Step size for Q-value updates
+LEARNING_RATE = 0.2     # Step size for Q-value updates (increased for faster learning)
 DISCOUNT_FACTOR = 0.95  # Future reward discount factor
 EPSILON = 1.0           # Initial exploration rate
-EPSILON_DECAY = 0.995   # Exploration decay per episode
+EPSILON_DECAY = 0.999   # Exploration decay per episode (slower decay for more exploration)
 EPSILON_MIN = 0.01      # Minimum exploration rate
-NUM_EPISODES = 1000     # Training episodes
+NUM_EPISODES = 2000     # Training episodes (increased for better convergence)
 ```
 
-### Action Space Discretization
+### Battery Management Parameters
 
-The continuous action space [linear_velocity, angular_velocity] is discretized into 25 discrete actions:
-- Linear velocities: [-1.0, -0.5, 0.0, 0.5, 1.0]
-- Angular velocities: [-1.0, -0.5, 0.0, 0.5, 1.0]
+```python
+INITIAL_BATTERY = 100.0          # Initial battery percentage
+BATTERY_DRAIN_LINEAR = 0.08      # Battery drain per linear velocity unit
+BATTERY_DRAIN_ANGULAR = 0.03     # Battery drain per angular velocity unit  
+BATTERY_DRAIN_IDLE = 0.005       # Battery drain when idle
+LOW_BATTERY_THRESHOLD = 20.0     # Low battery warning threshold
+CRITICAL_BATTERY_THRESHOLD = 5.0 # Critical battery level
+```
+
+### Action Space Discretization (Optimized for Navigation)
+
+The continuous action space [linear_velocity, angular_velocity] is discretized into 20 discrete actions:
+- **Linear velocities**: [0.0, 0.2, 0.5, 1.0] (forward-only for better navigation)
+- **Angular velocities**: [-1.0, -0.5, 0.0, 0.5, 1.0] (full turning range)
+
+**Rationale**: Removed backward movement to encourage forward navigation and reduce action space complexity.
 
 ## Training Configuration
 
-### Configurable Parameters
+### Configurable Parameters (Optimized)
 
 ```python
-# Navigation points
-START_POINT = [0.5, 0.0, 0.0]        # [x, y, yaw] starting position
-DESTINATION_POINT = [2.5, 2.5, 0.0]  # [x, y, yaw] target position
+# Navigation points (closer for easier initial learning)
+START_POINT = [1.0, 1.0, 0.0]        # [x, y, yaw] starting position
+DESTINATION_POINT = [2.0, 2.0, 0.0]  # [x, y, yaw] target position (1.41m distance)
 
 # Training mode
-HEADLESS_TRAINING = True              # No GUI during training
+HEADLESS_TRAINING = True              # No GUI during training (faster)
+VERBOSE_LOGGING = False               # Reduced logging for performance  
 SHOW_GUI_FOR_TESTING = True           # Show GUI for testing
+Q_TABLE_PRINT_INTERVAL = 50          # Print Q-table summary frequency
 ```
 
-### Performance Metrics
+### Performance Metrics (Enhanced with Battery Tracking)
 
 The training tracks:
-- **Episode rewards** (total reward per episode)
+- **Episode rewards** (total reward per episode including battery penalties)
 - **Episode lengths** (steps to completion/termination)
 - **Success rate** (percentage of episodes reaching target)
+- **Battery efficiency** (average battery remaining at completion)
+- **Battery depletion rate** (episodes ending due to battery exhaustion)
 - **Exploration rate** (current epsilon value)
+- **Q-table statistics** (states visited, value distributions)
 
 ## Usage Instructions
 
@@ -258,17 +284,37 @@ python testing.py
 
 Training output:
 ```
+🔋 Battery-Aware Environment Initialized
+   Initial Battery: 100.0%
+   Low Battery Threshold: 20.0%
+
 Training Configuration:
   Headless Mode: True
-  Episodes: 1000
+  Verbose Logging: False
+  Episodes: 2000
+  Q-table Print Interval: 50
 
-Episode 100/1000
-  Average Reward (last 100): -45.23
-  Average Length (last 100): 234.5
-  Success Rate: 15.20%
-  Epsilon: 0.366
+📈 Progress Report - Episode 100/2000
+  Average Reward (last 100): -23.45
+  Average Length (last 100): 187.2
+  Success Rate: 34.50%
+  Battery Efficiency: 76.3% avg remaining
+  Epsilon: 0.819
+  Q-table Size: 142 states
+
+📊 Q-Table Summary (Episode 150):
+  Total States Visited: 142
+  Non-zero Q-values: 568
+  Max Q-value: 45.23
+  Min Q-value: -87.45
+  Average Q-value: -12.34
 
 ✓ Q-table saved successfully to q_table_mir100.pkl
+  Saved 142 state entries
+📁 Files generated:
+   - q_table_mir100.pkl (trained Q-table)
+   - training_log.json (detailed training log)
+   - training_results.png (training plots)
 ```
 
 ### Running Navigation with Trained Agent
@@ -280,29 +326,90 @@ python robot_avoidance_ql.py
 
 Navigation output:
 ```
-🚀 Starting navigation...
-   From: [0.5, 0.0, 0.0]
-   To: [2.5, 2.5, 0.0]
+🤖 MiR100 Robot Navigation using Trained Q-Learning Agent
+� Battery-Aware Environment Initialized
+
+�🚀 Starting navigation...
+   From: [1.0, 1.0, 0.0]
+   To: [2.0, 2.0, 0.0]
+   Max steps: 1000
 
 📍 Navigation in progress...
-   Step 50: Distance to target = 2.1m
+   Step 50: Distance to target = 0.8m, Battery: 94.2%
+   Step 100: Distance to target = 0.3m, Battery: 88.7%
 
 📊 Navigation completed!
-   🎉 SUCCESS! Robot reached the destination!
+   Final Status: success
    Total Steps: 127
-   Total Reward: 45.30
+   Total Reward: 67.85
+   🔋 Final Battery: 85.3% (high)
+   🎉 SUCCESS! Robot reached the destination!
+   ⚡ EFFICIENCY BONUS: Completed with high battery!
+   📏 Total distance traveled: 1.89m
+
+📈 Summary of 3 navigation attempts:
+   Success Rate: 3/3 (100.0%)
+   Average Steps: 142.3
+   Average Reward: 71.45
 ```
 
-### File Structure
+### File Structure (Updated)
 
 ```
 robo-gym/
-├── testing.py              # Q-Learning training script
-├── robot_avoidance_ql.py   # Navigation with trained agent
-├── q_table_mir100.pkl      # Saved Q-table (generated)
-├── training_results.png    # Training plots (generated)
-└── MotionRL.md            # This documentation
+├── training.py                    # Battery-aware Q-Learning training script
+├── robot_avoidance_ql.py          # Navigation with trained agent (battery-aware)
+├── battery_mir100_env.py          # Battery-aware environment implementation
+├── battery_env_registration.py    # Environment registration helper
+├── q_table_mir100.pkl             # Saved Q-table (generated)
+├── training_log.json              # Detailed training statistics (generated)
+├── training_results.png           # Training plots (generated)
+└── MotionRL.md                   # This documentation
 ```
+
+## Battery System Implementation
+
+### Battery Management Features
+
+The enhanced environment includes a comprehensive battery management system:
+
+#### **Battery State Tracking**
+- **Real-time monitoring** of battery level (0-100%)
+- **Status classification**: full (>80%), high (50-80%), normal (20-50%), low (5-20%), critical (<5%)
+- **Consumption breakdown** per action (linear, angular, idle)
+
+#### **Energy Consumption Model**
+```python
+# Battery drain calculation per step
+linear_drain = abs(linear_velocity) * 0.08     # % per velocity unit
+angular_drain = abs(angular_velocity) * 0.03   # % per velocity unit  
+idle_drain = 0.005                             # % baseline consumption
+
+total_drain = linear_drain + angular_drain + idle_drain
+```
+
+#### **Battery-Aware Rewards**
+- **Efficiency incentive**: Lower consumption = higher rewards
+- **Low battery penalties**: Increasing penalties as battery depletes
+- **Completion bonuses**: Extra rewards for finishing with high battery
+- **Depletion termination**: Episode ends if battery reaches 0%
+
+#### **Implementation Location**
+- **Environment**: `/home/andy/mysource/robo-gym/battery_mir100_env.py`
+- **Registration**: `/home/andy/mysource/robo-gym/robo_gym/__init__.py`
+- **Base reward function**: Modified from `/home/andy/mysource/robo-gym/robo_gym/envs/mir100/mir100.py`
+
+### Expected Learning Behavior
+
+With battery constraints, the robot learns to:
+1. **Plan efficient paths** (shorter routes preserve battery)
+2. **Balance speed vs consumption** (slower movement = longer battery life)
+3. **Prioritize task completion** within energy constraints
+4. **Develop energy-aware navigation strategies**
+
+---
+
+*This documentation covers the battery-aware Q-Learning implementation for robot navigation and obstacle avoidance using the robo-gym framework. For additional details, refer to the source code comments and robo-gym official documentation.*
 
 ## Troubleshooting
 

@@ -179,7 +179,8 @@ def navigate_robot(agent, env, start_point, destination_point, max_steps=MAX_NAV
         # Print progress every 50 steps
         if step_count % 50 == 0:
             distance_to_target = np.sqrt((state[2] - state[0])**2 + (state[3] - state[1])**2)
-            print(f"   Step {step_count}: Distance to target = {distance_to_target:.2f}m")
+            battery_info = f", Battery: {info.get('battery_level', 'N/A'):.1f}%" if 'battery_level' in info else ""
+            print(f"   Step {step_count}: Distance to target = {distance_to_target:.2f}m{battery_info}")
         
         # Add visualization delay
         time.sleep(VISUALIZATION_DELAY)
@@ -193,10 +194,20 @@ def navigate_robot(agent, env, start_point, destination_point, max_steps=MAX_NAV
     print(f"   Total Steps: {step_count}")
     print(f"   Total Reward: {total_reward:.2f}")
     
+    # Battery information (if available)
+    if 'battery_level' in info:
+        battery_level = info['battery_level']
+        battery_status = info.get('battery_status', 'unknown')
+        print(f"   🔋 Final Battery: {battery_level:.1f}% ({battery_status})")
+    
     if final_status == 'success':
         print(f"   🎉 SUCCESS! Robot reached the destination!")
+        if 'battery_level' in info and info['battery_level'] > 70:
+            print(f"   ⚡ EFFICIENCY BONUS: Completed with high battery!")
     elif final_status == 'collision':
         print(f"   💥 COLLISION! Robot hit an obstacle.")
+    elif final_status == 'battery_depleted':
+        print(f"   🔋 BATTERY DEPLETED! Robot ran out of power.")
     elif final_status == 'max_steps_exceeded':
         print(f"   ⏰ TIMEOUT! Maximum steps exceeded.")
     else:
@@ -264,7 +275,7 @@ def main():
     try:
         # Initialize environment
         print(f"\n🌍 Initializing environment...")
-        env = gym.make('ObstacleAvoidanceMir100Sim-v0', ip=target_machine_ip, gui=True)
+        env = gym.make('BatteryObstacleAvoidanceMir100Sim-v0', ip=target_machine_ip, gui=True)
         print(f"✓ Environment initialized successfully")
         
         # Load trained agent

@@ -34,6 +34,11 @@ register(
     entry_point="robo_gym.envs:ObstacleAvoidanceMir100Rob",
 )
 
+register(
+    id="BatteryObstacleAvoidanceMir100Sim-v0",
+    entry_point="robo_gym.envs:BatteryAwareObstacleAvoidanceMir100Sim",
+)
+
 # UR Environments
 register(
     id="EmptyEnvironmentURSim-v0",
