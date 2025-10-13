@@ -110,6 +110,22 @@ class BatteryAwareObstacleAvoidanceMir100(ObstacleAvoidanceMir100):
         
         # Apply battery penalty to reward
         reward += battery_penalty
+
+        # === Idle / stand-still penalty (consistent with base env) ===
+        if abs(action[0]) <= getattr(self, 'idle_linear_threshold', 0.05) and abs(action[1]) <= getattr(self, 'idle_angular_threshold', 0.05):
+            self.idle_steps = getattr(self, 'idle_steps', 0) + 1
+        else:
+            self.idle_steps = 0
+
+        if getattr(self, 'idle_steps', 0) >= getattr(self, 'idle_penalty_apply_after', 1):
+            reward -= getattr(self, 'idle_penalty_per_step', 0.5)
+            info['idle_penalty_applied'] = True
+        else:
+            info['idle_penalty_applied'] = False
+
+        # Add idle steps to info for debugging
+        info['idle_steps'] = int(getattr(self, 'idle_steps', 0))
+        # === end idle penalty ===
         
         # Add battery information to info
         battery_status = self._get_battery_status()

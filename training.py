@@ -261,8 +261,9 @@ def calculate_q_table_change(old_q_table, new_q_table):
     # Check common states
     for state in old_q_table:
         if state in new_q_table:
-            old_values = np.array(list(old_q_table[state].values()))
-            new_values = np.array(list(new_q_table[state].values()))
+            # Q-table values are numpy arrays, not dicts
+            old_values = old_q_table[state]
+            new_values = new_q_table[state]
             
             if len(old_values) == len(new_values):
                 change = np.mean(np.abs(new_values - old_values))
@@ -748,7 +749,7 @@ def train_q_learning():
             # Create a deep copy of Q-table for comparison
             q_table_snapshot = {}
             for state, actions in agent.q_table.items():
-                q_table_snapshot[state] = dict(actions)
+                q_table_snapshot[state] = actions.copy()  # Copy numpy array, not convert to dict
             q_table_history.append(q_table_snapshot)
             
             # Keep only recent Q-table history to manage memory
