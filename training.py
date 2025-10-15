@@ -54,19 +54,19 @@ RESUME_FROM_CHECKPOINT = True  # Whether to resume from latest checkpoint if ava
 
 # Early stopping configuration
 ENABLE_EARLY_STOPPING = True      # Enable early stopping mechanism
-EARLY_STOP_SUCCESS_RATE = 95.0    # Stop when success rate reaches this % over evaluation window
+EARLY_STOP_SUCCESS_RATE = 80.0    # Stop when success rate reaches this % over evaluation window (lowered from 95%)
 EARLY_STOP_WINDOW = 200           # Number of recent episodes to evaluate for early stopping
-EARLY_STOP_MIN_EPISODES = 500     # Minimum episodes before early stopping can trigger
+EARLY_STOP_MIN_EPISODES = 2000    # Minimum episodes before early stopping can trigger (increased from 500)
 EARLY_STOP_CONVERGENCE_THRESHOLD = 0.001  # Stop when Q-table changes less than this
 EARLY_STOP_CONVERGENCE_WINDOW = 100       # Episodes to check for convergence
-EARLY_STOP_PLATEAU_EPISODES = 300         # Stop if no improvement for this many episodes
+EARLY_STOP_PLATEAU_EPISODES = 500         # Stop if no improvement for this many episodes (increased from 300)
 
 # Q-Learning parameters
-LEARNING_RATE = 0.2  # Increased for faster learning
+LEARNING_RATE = 0.3  # Increased for faster learning (was 0.2)
 DISCOUNT_FACTOR = 0.95
 EPSILON = 1.0  # Initial exploration rate
-EPSILON_DECAY = 0.999  # Slower decay for more exploration
-EPSILON_MIN = 0.01
+EPSILON_DECAY = 0.9995  # Slower decay for more exploration (was 0.999)
+EPSILON_MIN = 0.05  # Higher minimum to maintain exploration (was 0.01)
 NUM_EPISODES = 10000  # Increased episodes for multi-point training
 
 # State discretization parameters
@@ -242,11 +242,14 @@ def check_early_stopping(episode, episode_rewards, q_table_history, success_coun
         late_avg = np.mean(late_performance)
         improvement = late_avg - early_avg
         
-        # If improvement is less than 5% of the early average, consider it a plateau
-        improvement_threshold = abs(early_avg) * 0.05 if early_avg != 0 else 0.1
+        # More lenient plateau threshold: 10% improvement required (was 5%)
+        # Also require that success rate is reasonably high before stopping on plateau
+        improvement_threshold = abs(early_avg) * 0.10 if early_avg != 0 else 1.0
+        recent_success_rate = (sum(success_history[-EARLY_STOP_WINDOW:]) / min(len(success_history), EARLY_STOP_WINDOW)) * 100
         
-        if improvement < improvement_threshold:
-            return True, f"Performance plateau detected: improvement {improvement:.3f} < threshold {improvement_threshold:.3f} over {EARLY_STOP_PLATEAU_EPISODES} episodes"
+        # Only stop on plateau if improvement is low AND success rate is at least 50%
+        if improvement < improvement_threshold and recent_success_rate >= 50.0:
+            return True, f"Performance plateau detected: improvement {improvement:.3f} < threshold {improvement_threshold:.3f} over {EARLY_STOP_PLATEAU_EPISODES} episodes (success rate: {recent_success_rate:.1f}%)"
     
     return False, None
 

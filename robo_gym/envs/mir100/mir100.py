@@ -54,6 +54,15 @@ class Mir100Env(gym.Env):
         # Maximum angular velocity (rad/s) of MiR
         max_ang_vel = 0.7
         self.max_vel = np.array([max_lin_vel, max_ang_vel])
+        # Idle / stand-still penalty configuration
+        # If both linear and angular actions are below thresholds for
+        # `idle_penalty_apply_after` consecutive steps, apply a per-step
+        # penalty to discourage the agent from standing still.
+        self.idle_linear_threshold = kwargs.get("idle_linear_threshold", 0.05)
+        self.idle_angular_threshold = kwargs.get("idle_angular_threshold", 0.05)
+        self.idle_penalty_per_step = kwargs.get("idle_penalty_per_step", 0.5)
+        self.idle_penalty_apply_after = kwargs.get("idle_penalty_apply_after", 1)
+        self.idle_steps = 0
 
         # Connect to Robot Server
         if rs_address:
@@ -89,6 +98,8 @@ class Mir100Env(gym.Env):
         self.elapsed_steps = 0
 
         self.prev_base_reward = None
+        # Reset idle counter on episode reset
+        self.idle_steps = 0
 
         # Initialize environment state
         self.state = np.zeros(self._get_env_state_len())
@@ -424,6 +435,17 @@ class NoObstacleNavigationMir100(Mir100Env):
         reward -= linear_power
         reward -= angular_power
 
+        # === Idle / stand-still penalty ===
+        # Check if both linear and angular commands are below thresholds
+        if abs(action[0]) <= self.idle_linear_threshold and abs(action[1]) <= self.idle_angular_threshold:
+            self.idle_steps += 1
+        else:
+            self.idle_steps = 0
+
+        if self.idle_steps >= self.idle_penalty_apply_after:
+            reward -= self.idle_penalty_per_step
+        # === end idle penalty ===
+
         # End episode if robot is outside of boundary box
         if self._robot_outside_of_boundary_box(rs_state[3:5]):
             reward = -200.0
@@ -569,6 +591,17 @@ class ObstacleAvoidanceMir100(Mir100Env):
         angular_power = abs(action[1] * 0.03)
         reward -= linear_power
         reward -= angular_power
+
+        # === Idle / stand-still penalty ===
+        # Check if both linear and angular commands are below thresholds
+        if abs(action[0]) <= self.idle_linear_threshold and abs(action[1]) <= self.idle_angular_threshold:
+            self.idle_steps += 1
+        else:
+            self.idle_steps = 0
+
+        if self.idle_steps >= self.idle_penalty_apply_after:
+            reward -= self.idle_penalty_per_step
+        # === end idle penalty ===
 
         # End episode if robot is collides with an object, if it is too close
         # to an object.
